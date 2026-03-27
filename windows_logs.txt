@@ -1,0 +1,100 @@
+--- Exporting last 20 events from System ---
+
+Time: Fri Mar 27 13:27:50 2026
+Source: Microsoft-Windows-Kernel-General [ID: 16]
+Message: 
+------------------------------
+Time: Fri Mar 27 13:23:42 2026
+Source: DCOM [ID: 10016]
+Message: Raw Data: ('application-specific', 'Local', 'Activation', '{2593F8B9-4EAF-457C-B68A-50F6B8EA6B54}', '{15C20B67-12E7-4BB6-92BB-7AFF07997402}', 'GINGA-TETSUDOU', 'akemi', 'S-1-5-21-822067139-1563678613-1828933217-1001', 'LocalHost (Using LRPC)', 'Unavailable', 'Unavailable')
+------------------------------
+Time: Fri Mar 27 13:11:04 2026
+Source: DCOM [ID: 10016]
+Message: Raw Data: ('application-specific', 'Local', 'Activation', '{2593F8B9-4EAF-457C-B68A-50F6B8EA6B54}', '{15C20B67-12E7-4BB6-92BB-7AFF07997402}', 'GINGA-TETSUDOU', 'akemi', 'S-1-5-21-822067139-1563678613-1828933217-1001', 'LocalHost (Using LRPC)', 'Unavailable', 'Unavailable')
+------------------------------
+Time: Fri Mar 27 13:10:32 2026
+Source: VBoxNetLwf [ID: -1073479668]
+Message: ドライバーは \Device\VBoxNetLwf で内部ドライバー エラーを検出しました。
+
+------------------------------
+Time: Fri Mar 27 13:10:32 2026
+Source: Microsoft-Windows-NDIS [ID: 10317]
+Message: ミニポート SAMSUNG Mobile USB Remote NDIS Network Device、{6ba2d2b4-2789-4e79-b7ff-5de2a7c3ab29}、イベント 74 がありました
+
+------------------------------
+Time: Fri Mar 27 13:10:28 2026
+Source: Microsoft-Windows-Power-Troubleshooter [ID: 1]
+Message: システムは低電力状態から再開しました。
+
+スリープ時間: 2026-03-27T09:08:30.8952328Z
+スリープ解除時間: 2026-03-27T10:10:27.7549143Z
+
+スリープ状態の解除元: 5USB Composite Device
+
+------------------------------
+Time: Fri Mar 27 13:10:27 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 566]
+Message: 
+------------------------------
+Time: Fri Mar 27 13:10:27 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 566]
+Message: 
+------------------------------
+Time: Fri Mar 27 13:10:27 2026
+Source: BTHUSB [ID: 1074069522]
+Message: Bluetooth の認証コード (link keys) をローカル アダプター上に保管できません。スタートアップの間に Bluetooth キーボードは、システム BIOS で機能しない可能性があります。
+
+------------------------------
+Time: Fri Mar 27 13:10:25 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 130]
+Message: 
+------------------------------
+Time: Fri Mar 27 13:10:25 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 131]
+Message: 
+------------------------------
+Time: Fri Mar 27 13:10:25 2026
+Source: Microsoft-Windows-Kernel-General [ID: 1]
+Message: CVE の検出の可能性: 2026-03-27T10:10:25.5000000Z
+追加情報: 2026-03-27T09:08:41.0416917Z
+
+このイベントは、既知の脆弱性 (2026-03-27T10:10:25.5000000Z) を悪用する試みが検出されたときに生成されます。
+このイベントはユーザー モード プロセスで発生します。
+
+
+------------------------------
+Time: Fri Mar 27 12:08:41 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 107]
+Message: 
+------------------------------
+Time: Fri Mar 27 12:08:37 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 42]
+Message: 
+------------------------------
+Time: Fri Mar 27 12:08:30 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 566]
+Message: 
+------------------------------
+Time: Fri Mar 27 12:08:30 2026
+Source: Microsoft-Windows-Kernel-Power [ID: 187]
+Message: 
+------------------------------
+Time: Fri Mar 27 12:05:47 2026
+Source: DCOM [ID: 10016]
+Message: Raw Data: ('application-specific', 'Local', 'Activation', '{2593F8B9-4EAF-457C-B68A-50F6B8EA6B54}', '{15C20B67-12E7-4BB6-92BB-7AFF07997402}', 'GINGA-TETSUDOU', 'akemi', 'S-1-5-21-822067139-1563678613-1828933217-1001', 'LocalHost (Using LRPC)', 'Unavailable', 'Unavailable')
+------------------------------
+Time: Fri Mar 27 12:00:00 2026
+Source: EventLog [ID: -2147477635]
+Message: システムの稼働時間は 17965 秒です。
+
+------------------------------
+Time: Fri Mar 27 11:36:59 2026
+Source: VBoxNetLwf [ID: -1073479668]
+Message: ドライバーは \Device\VBoxNetLwf で内部ドライバー エラーを検出しました。
+
+------------------------------
+Time: Fri Mar 27 11:28:34 2026
+Source: Service Control Manager [ID: 1073748864]
+Message: Background Intelligent Transfer Service サービスの開始の種類は auto start から demand start に変更されました。
+
+------------------------------
