@@ -30,8 +30,11 @@ Email
 
 reached solution
  most reliable so far is **Applications and Services Logs > Microsoft > Windows > DriverFrameworks-UserMode > Operational.** ✓
+    track from security logins
+ filteration ----
+ look for USBSTOR & filter logs to take only  1 2102 log per 3 seconds (work on this)
+  take out system and UMFD-1  email? & filter logs to take only  1 2102 log per 3 seconds (work on this) [(filter out by type (type 2)) or not since im not seeing a problem]
 
- look for USBSTOR & filter logs to take only  1 2102 log per 3 seconds 
  ---
 
  Component	Responsibility
@@ -39,3 +42,9 @@ fetch_win_logs(channel, event_id)	Queries Windows for a specific ID and returns 
 fetch_external_logs(path)	(Optional) If you have logs from a text file or another tool, this reads them into the same dict format.
 filter_by_date(logs, target_date)	Takes a list of logs and keeps only those where the date matches "Today."
 generate_csv(combined_logs, filename)	Sorts the combined list by time descending and saves to CSV.
+
+
+### think about identification we need to write identity perhaps include it at the end when combining all information add user key or smthn
+
+
+write test cases
