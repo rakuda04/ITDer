@@ -8,22 +8,28 @@ import win32evtlog
 # ==========================================
 # 1. CORE ENGINE (The "How")
 # ==========================================
-def run_evt_query(path, event_id, days_back=1):
-    # Calculate time for XPath (last X days)
-    # 86400000 ms = 24 hours
+def run_evt_query(path, criteria, days_back=1):
     ms_limit = days_back * 86400000
-    xpath = f"*[System[(EventID={event_id}) and TimeCreated[timediff(@SystemTime) <= {ms_limit}]]]"
+    xpath = f"*[System[({criteria}) and TimeCreated[timediff(@SystemTime) <= {ms_limit}]]]"
     
+    events = []
     try:
         query_handle = win32evtlog.EvtQuery(
             path, 
             win32evtlog.EvtQueryChannelPath | win32evtlog.EvtQueryReverseDirection,
             xpath
         )
-        return win32evtlog.EvtNext(query_handle, 1000) # Get up to 1000 events
+        
+        while True:
+            batch = win32evtlog.EvtNext(query_handle, 50)
+            if not batch:
+                break
+            events.extend(batch)
+            
     except Exception as e:
-        print(f"Query Error in {path}: {e}")
-        return []
+        pass
+        
+    return events
 
 # ==========================================
 # 2. LOG WRAPPERS (The "What")
@@ -59,46 +65,45 @@ def get_umdf_events(event_id, days=1):
         
     return parsed_results #list of dictionaries
 
-#print(json.dumps(get_umdf_events(2102), indent=2, default=str))
+#print(json.dumps(get_umdf_events(2102), indent=2, default=str)) # NEEDS FIXING ##################################################
 
-def get_security_events(event_id, days=1):
-    # focus on longon type TYPE 2 PHYSICAL LOGON
+##temp placement ##
+def is_system_account(username):
+    system_patterns = ["SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "ANONYMOUS LOGON", "DWM-", "UMDF-", "UMFD-"]
+    return any(pattern in username.upper() for pattern in system_patterns)
+
+def get_security_events(criteria="EventID=4624 or EventID=4634", days=1):
     path = "Security"
-    raw_events = run_evt_query(path, event_id, days)
+    raw_events = run_evt_query(path, criteria, days) # Assuming your existing function
     
     parsed_results = []
-    # Note: EventData tags often ignore the 'ns' namespace, so we use {*} to match any namespace
+    ns = {'ns': 'http://schemas.microsoft.com/win/2004/08/events/event'}
     
     for event in raw_events:
         xml_str = win32evtlog.EvtRender(event, win32evtlog.EvtRenderEventXml)
         root = ET.fromstring(xml_str)
         
-        # 1. Standard System Data
-        utc_str = root.find('.//ns:TimeCreated', {'ns': 'http://schemas.microsoft.com/win/2004/08/events/event'}).get('SystemTime')
-        dt_obj = datetime.fromisoformat(utc_str.replace('Z', '+00:00')).astimezone()
-
-        # 2. Extract Security Specific Data
         user_node = root.find('.//{*}Data[@Name="TargetUserName"]')
         user_name = user_node.text if user_node is not None else "N/A"
         
-        # --- NEW: Extract Logon ID ---
-        logon_id_node = root.find('.//{*}Data[@Name="TargetLogonId"]')
-        logon_id = logon_id_node.text if logon_id_node is not None else "0x0"
-
-        # 3. Build the dictionary
-        log_entry = {
-            "timestamp": dt_obj,
-            "time_display": dt_obj.strftime('%Y-%m-%d %H:%M:%S'),
-            "event_id": event_id,
-            "source": "Security",
-            "device": "N/A",
-            "user": user_name,
-            "logon_id": logon_id # Added this field
-        }
-        parsed_results.append(log_entry)
+        if is_system_account(user_name): continue
+            
+        eid = int(root.find('.//ns:EventID', ns).text)
         
-    return parsed_results
-print(json.dumps(get_security_events(4624), indent=2, default=str)) #test
+        # Filter for Interactive/Network Logons only
+        if eid == 4624:
+            logon_type = root.find('.//{*}Data[@Name="LogonType"]').text
+            if logon_type not in ['2', '3', '7', '10', '11']: continue
+                
+        parsed_results.append({
+            "event_id": eid,
+            "user": user_name,
+            "timestamp": root.find('.//ns:TimeCreated', ns).get('SystemTime'),
+            "logon_id": root.find('.//{*}Data[@Name="TargetLogonId"]').text
+        })
+    
+    return sorted(parsed_results, key=lambda x: x['timestamp'])
+print(json.dumps(get_security_events(), indent=2, default=str)) #test
     
 # ==========================================
 # 3. REFINERS / FILTERS (The "Cleaning")
@@ -118,6 +123,10 @@ def refine_usb_only(log_list):
 
 #  print(json.dumps(refine_usb_only(get_umdf_events(2102)), indent=2, default=str))
 
+
+
+
+
 # ==========================================
 # 4. AGGREGATOR & EXPORT (The "Output")
 # ==========================================
@@ -131,3 +140,4 @@ if __name__ == "__main__":
     # Step 3: Combine
     # Step 4: Save
     pass
+

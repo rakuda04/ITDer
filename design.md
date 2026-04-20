@@ -33,8 +33,9 @@ reached solution
     track from security logins
  filteration ----
  look for USBSTOR & filter logs to take only  1 2102 log per 3 seconds (work on this)
-  take out system and UMFD-1  email? & filter logs to take only  1 2102 log per 3 seconds (work on this) [(filter out by type (type 2)) or not since im not seeing a problem]
 
+
+security is getting duped 4 times per logon and each one of them is a different event id i want to get logon and logoff that are a session long term or like normal user activity lvl ts
  ---
 
  Component	Responsibility
