@@ -27,7 +27,7 @@ def run_evt_query(path, criteria, days_back=1):
             events.extend(batch)
             
     except Exception as e:
-        pass
+       print(f"DEBUG: Error reading event log: {e}") 
         
     return events
 
@@ -67,43 +67,45 @@ def get_umdf_events(event_id, days=1):
 
 #print(json.dumps(get_umdf_events(2102), indent=2, default=str)) # NEEDS FIXING ##################################################
 
-##temp placement ##
-def is_system_account(username):
-    system_patterns = ["SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "ANONYMOUS LOGON", "DWM-", "UMDF-", "UMFD-"]
-    return any(pattern in username.upper() for pattern in system_patterns)
 
-def get_security_events(criteria="EventID=4624 or EventID=4634", days=1):
+
+
+def get_security_events(criteria="EventID=4800 or EventID=4801", days=1): # this event/s needs to be turned on manually and doesnt not account for boot login (FIX THIS)
+
     path = "Security"
-    raw_events = run_evt_query(path, criteria, days) # Assuming your existing function
-    
+    raw_events = run_evt_query(path, criteria, days)
+        
     parsed_results = []
     ns = {'ns': 'http://schemas.microsoft.com/win/2004/08/events/event'}
     
     for event in raw_events:
         xml_str = win32evtlog.EvtRender(event, win32evtlog.EvtRenderEventXml)
         root = ET.fromstring(xml_str)
-        
-        user_node = root.find('.//{*}Data[@Name="TargetUserName"]')
-        user_name = user_node.text if user_node is not None else "N/A"
-        
-        if is_system_account(user_name): continue
-            
         eid = int(root.find('.//ns:EventID', ns).text)
         
-        # Filter for Interactive/Network Logons only
-        if eid == 4624:
-            logon_type = root.find('.//{*}Data[@Name="LogonType"]').text
-            if logon_type not in ['2', '3', '7', '10', '11']: continue
-                
+
+        data_nodes = root.findall('.//ns:Data', ns)
+        event_data = {node.get('Name'): node.text for node in data_nodes if node.get('Name')}
+        
+        user_name = event_data.get('TargetUserName', 'n/a').lower()
+        logon_id = event_data.get('TargetLogonId', 'n/a')
+        
+        # Filter out system junk
+        if is_system_account(user_name) or user_name == "n/a": 
+            continue
+            
         parsed_results.append({
             "event_id": eid,
+            "event_type": "LOCK" if eid == 4800 else "UNLOCK",
             "user": user_name,
             "timestamp": root.find('.//ns:TimeCreated', ns).get('SystemTime'),
-            "logon_id": root.find('.//{*}Data[@Name="TargetLogonId"]').text
+            "logon_id": logon_id
         })
     
     return sorted(parsed_results, key=lambda x: x['timestamp'])
-print(json.dumps(get_security_events(), indent=2, default=str)) #test
+print(json.dumps(get_security_events(), indent=2, default=str))
+#print(json.dumps(debounce_events(get_security_events()), indent=2, default=str)) #test
+    
     
 # ==========================================
 # 3. REFINERS / FILTERS (The "Cleaning")
@@ -139,5 +141,6 @@ if __name__ == "__main__":
     # Step 2: Filter
     # Step 3: Combine
     # Step 4: Save
+
     pass
 
