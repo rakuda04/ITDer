@@ -35,7 +35,12 @@ reached solution
  look for USBSTOR & filter logs to take only  1 2102 log per 3 seconds (work on this)
 
 
-security is getting duped 4 times per logon and each one of them is a different event id i want to get logon and logoff that are a session long term or like normal user activity lvl ts
+problem statment : security is getting duped 4 times per logon and each one of them is a different event id i want to get logon and logoff that are a session long term or like normal user activity lvl ts
+
+solution being tested now :
+      logon : filter spesfically for login type:2(local interactive ie. keyboard) in 4624
+      logoff : look at event ID 4647 that signals sign out or shut down (happens once per session) 
+ 
  ---
 
  Component	Responsibility
@@ -49,3 +54,6 @@ generate_csv(combined_logs, filename)	Sorts the combined list by time descending
 
 
 write test cases
+
+
+faced some setbacks of inconsistency of logging with my original implementations, decided to scrap that and try a different way. its nothing impossible , just taking a while  
