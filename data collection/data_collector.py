@@ -4,7 +4,7 @@ import json
 import re
 import win32evtlog
 import csv
-
+import os
 # ==========================================
 # 1. CORE ENGINE
 # ==========================================
@@ -58,7 +58,7 @@ def get_umdf_events(criteria="EventID=2003 or EventID=2100 or EventID=2102", day
             "event_id": eid,
             "source": "UMDF",
             "device": instance_node.text if instance_node is not None else "N/A",
-            "user": "SYSTEM" # UMDF usually runs as system
+            "user": os.getlogin()
         }
         parsed_results.append(log_entry)
         
@@ -70,7 +70,6 @@ def get_umdf_events(criteria="EventID=2003 or EventID=2100 or EventID=2102", day
 
 
  # this event/s needs to be turned on manually and doesnt not account for boot login (CREATE SCRIPT) events to be turned on manually 4801,4800
- #AHHHHHHHHHHHHH BIG BRAIN MOMENT!!!! SO WHEN THE PROGRAM RUNS LOG A STARTUP LOGIN EVENT AT THE CURRENT TIME 
  
  # 1074(system) for shutdown,
 #  lock unlock ,logoff is shutdown, startup is boot
@@ -93,8 +92,8 @@ def get_security_events(days=1):
     #  Manual the Startup Event
     parsed_results.append({
         "event_id": 4624, 
-        "activity": "LOGON(manual startup)",
-        "user": "current_user", 
+        "activity": "LOGON (manual startup)",
+        "user": os.getlogin(), 
         "timestamp": datetime.now().astimezone(),
         "logon_id": "n/a"
     })
@@ -126,7 +125,7 @@ def get_security_events(days=1):
             parsed_results.append({
                 "event_id": eid,
                 "activity": config['labels'].get(eid, "OTHER"),
-                "user": event_data.get('TargetUserName', 'n/a').lower(),
+                "user": os.getlogin(),
                 "timestamp": dt_obj,
                 "logon_id": event_data.get('TargetLogonId', 'n/a')
             })
@@ -140,7 +139,7 @@ def get_security_events(days=1):
 # ==========================================
 def refine_usb_only(log_list):
     # Regex for USBSTOR or  USB patterns
-    usb_pattern = re.compile(r"USBSTOR|VID_|PID_", re.IGNORECASE) # be informed it also includes none usb too ie android (but it makes sense somewhat)
+    usb_pattern = re.compile(r"^(USB\\VID_|SWD\\WPDBUSENUM)", re.IGNORECASE) # be informed it also includes none usb too ie android (but it makes sense somewhat)
     
     filtered_list = [
         entry for entry in log_list 
@@ -183,7 +182,7 @@ def filter_usb_duplicates(log_list):
                 # --- Condition B: Filter "Phantom" Bounces ---
                 if (prev['category'] == "CONNECT" and 
                     entry['category'] == "DISCONNECT" and 
-                    abs(time_diff) < 0.5):
+                    abs(time_diff) < 1.0):
                     continue
             
             # Update the last seen state for this specific device
@@ -205,10 +204,10 @@ def filter_usb_duplicates(log_list):
 # ==========================================
 
 def get_all_combined_events(days=1):
-    umdf_data = get_umdf_events(days=days)
+    umdf_data = refine_usb_only(get_umdf_events(days=days))
     security_data = get_security_events(days=days)
     
-    combined = umdf_data + security_data
+    combined =  umdf_data + security_data #security_data #  +
     
     combined.sort(key=lambda x: x['timestamp'])
     
@@ -257,7 +256,7 @@ if __name__ == "__main__":
     
     # 2. Filter out duplicates and rapid connection bounces
     print("Filtering duplicates and noise...")
-    clean_data = filter_usb_duplicates(raw_data)
+    clean_data = filter_usb_duplicates(raw_data) # refine_usb_only(raw_data)needs to move to combine data 
     
     # 3. Save directly to CSV
     print("Writing to CSV...")
