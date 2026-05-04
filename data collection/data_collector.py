@@ -3,7 +3,8 @@ from datetime import datetime
 import json
 import re
 import win32evtlog
-
+import csv
+import os
 # ==========================================
 # 1. CORE ENGINE
 # ==========================================
@@ -33,7 +34,7 @@ def run_evt_query(path, criteria, days_back=1):
 # ==========================================
 # 2. LOG WRAPPERS 
 # ==========================================        usb all good EventID=2003,  or EventID=2102 and 2100 (contains dupes)
-def get_umdf_events(criteria="EventID=2003 EventID=2100 or EventID=2102", days=1): # 2003 ( device connection) 2102(graceful exit) 2100(suprise removal)
+def get_umdf_events(criteria="EventID=2003 or EventID=2100 or EventID=2102", days=1): # 2003 ( device connection) 2102(graceful exit) 2100(suprise removal)
     path = "Microsoft-Windows-DriverFrameworks-UserMode/Operational" #use operational but filter based on 1 log in sec
     raw_events = run_evt_query(path, criteria, days)
     
@@ -54,26 +55,24 @@ def get_umdf_events(criteria="EventID=2003 EventID=2100 or EventID=2102", days=1
         # Build the dictionary for this row
         log_entry = {
             "timestamp": dt_obj, # Keep as object for sorting
-            "time_display": dt_obj.strftime('%Y-%m-%d %H:%M:%S'),
             "event_id": eid,
             "source": "UMDF",
             "device": instance_node.text if instance_node is not None else "N/A",
-            "user": "SYSTEM" # UMDF usually runs as system
+            "user": os.getlogin()
         }
         parsed_results.append(log_entry)
         
     return sorted(parsed_results, key=lambda x: x['timestamp'])
 
-print(json.dumps(get_umdf_events(), indent=2, default=str)) 
+#print(json.dumps(get_umdf_events(), indent=2, default=str)) 
 
 
 
 
  # this event/s needs to be turned on manually and doesnt not account for boot login (CREATE SCRIPT) events to be turned on manually 4801,4800
- #AHHHHHHHHHHHHH BIG BRAIN MOMENT!!!! SO WHEN THE PROGRAM RUNS LOG A STARTUP LOGIN EVENT AT THE CURRENT TIME 
  
  # 1074(system) for shutdown,
-#  lock unlock works,logoff is shutdown, startup is boot
+#  lock unlock ,logoff is shutdown, startup is boot
 
 def get_security_events(days=1):
     parsed_results = []
@@ -93,9 +92,9 @@ def get_security_events(days=1):
     #  Manual the Startup Event
     parsed_results.append({
         "event_id": 4624, 
-        "activity": "LOGON(manual startup)",
-        "user": "current_user", 
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "activity": "LOGON (manual startup)",
+        "user": os.getlogin(), 
+        "timestamp": datetime.now().astimezone(),
         "logon_id": "n/a"
     })
     
@@ -126,8 +125,8 @@ def get_security_events(days=1):
             parsed_results.append({
                 "event_id": eid,
                 "activity": config['labels'].get(eid, "OTHER"),
-                "user": event_data.get('TargetUserName', 'n/a').lower(),
-                "timestamp": dt_obj.strftime('%Y-%m-%d %H:%M:%S'),
+                "user": os.getlogin(),
+                "timestamp": dt_obj,
                 "logon_id": event_data.get('TargetLogonId', 'n/a')
             })
     
@@ -140,10 +139,8 @@ def get_security_events(days=1):
 # ==========================================
 def refine_usb_only(log_list):
     # Regex for USBSTOR or  USB patterns
-    # Case-insensitive to be safe
-    usb_pattern = re.compile(r"USBSTOR|VID_|PID_", re.IGNORECASE) # be informed it also includes none usb too ie android (but it makes sense somewhat)
+    usb_pattern = re.compile(r"^(USB\\VID_|SWD\\WPDBUSENUM)", re.IGNORECASE) # be informed it also includes none usb too ie android (but it makes sense somewhat)
     
-    # We use a list comprehension to keep it fast
     filtered_list = [
         entry for entry in log_list 
         if usb_pattern.search(entry['device'])
@@ -151,11 +148,53 @@ def refine_usb_only(log_list):
     
     return filtered_list
 
-print(json.dumps(refine_usb_only(get_umdf_events()), indent=2, default=str))
+# print(json.dumps(refine_usb_only(get_umdf_events()), indent=2, default=str))
 
-def filter_usb_duplicates(loglist):
-    pass
+def filter_usb_duplicates(log_list):
+    if not log_list:
+        return []
 
+    unique_logs = []
+    # Tracks the last kept log for each specific device ID
+    last_usb_state = {} 
+
+    # 1. Sort the combined list chronologically
+    sorted_logs = sorted(log_list, key=lambda x: x['timestamp'])
+
+    for entry in sorted_logs:
+        # Check if this is a UMDF/USB event
+        is_usb = 'device' in entry
+        
+        if is_usb:
+            # Assign Category
+            entry['category'] = "CONNECT" if entry['event_id'] == 2003 else "DISCONNECT"
+            dev_id = entry['device']
+            
+            # Check if we have seen this specific device before
+            if dev_id in last_usb_state:
+                prev = last_usb_state[dev_id]
+                time_diff = (entry['timestamp'] - prev['timestamp']).total_seconds()
+                
+                # --- Condition A: Filter Identical Duplicates ---
+                if (entry['category'] == prev['category'] and abs(time_diff) <= 1.5):
+                    continue
+
+                # --- Condition B: Filter "Phantom" Bounces ---
+                if (prev['category'] == "CONNECT" and 
+                    entry['category'] == "DISCONNECT" and 
+                    abs(time_diff) < 1.0):
+                    continue
+            
+            # Update the last seen state for this specific device
+            last_usb_state[dev_id] = entry
+
+        # Always keep Security events, and keep USB events that passed the filters
+        unique_logs.append(entry)
+        
+    return unique_logs
+            
+
+# print(json.dumps(filter_usb_duplicates(refine_usb_only(get_umdf_events())), indent=2, default=str))
 
 
 
@@ -163,15 +202,64 @@ def filter_usb_duplicates(loglist):
 # ==========================================
 # 4. AGGREGATOR & EXPORT 
 # ==========================================
-def save_to_massive_csv(combined_data, filename):
-    pass
+
+def get_all_combined_events(days=1):
+    umdf_data = refine_usb_only(get_umdf_events(days=days))
+    security_data = get_security_events(days=days)
+    
+    combined =  umdf_data + security_data #security_data #  +
+    
+    combined.sort(key=lambda x: x['timestamp'])
+    
+    return combined
+
+# print(json.dumps(get_all_combined_events(), indent=2, default=str))
+
+
+
+
+def save_to_massive_csv(combined_data, filename="combined_events.csv"):
+    if not combined_data:
+        print("No data to save.")
+        return
+
+    # Define the columns that will be written to the CSV file.
+    fieldnames = ["timestamp", "event_id", "source", "device", "user", "activity", "logon_id", "category"]
+
+    try:
+        with open(filename, mode='w', newline='', encoding='utf-8') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for entry in combined_data:
+                # Create a row, ensuring missing keys default to an empty string
+                row = {field: entry.get(field, "") for field in fieldnames}
+                
+                # Convert the datetime object back to a string for CSV storage
+                if isinstance(row["timestamp"], datetime):
+                    row["timestamp"] = row["timestamp"].strftime("%Y-%m-%d %H:%M:%S.%f%z")
+                    
+                writer.writerow(row)
+                
+        print(f"Successfully saved {len(combined_data)} events to {filename}")
+        
+    except Exception as e:
+        print(f"Error saving CSV: {e}")
+        
+        
 
 if __name__ == "__main__":
-    # This is your "Workflow Orchestrator"
-    # Step 1: Get
-    # Step 2: Filter
-    # Step 3: Combine
-    # Step 4: Save
 
-    pass
+    # 1. Gather all events from both sources (Security + UMDF)
+    print("Gathering combined logs...")
+    raw_data = get_all_combined_events(days=1)
+    
+    # 2. Filter out duplicates and rapid connection bounces
+    print("Filtering duplicates and noise...")
+    clean_data = filter_usb_duplicates(raw_data) # refine_usb_only(raw_data)needs to move to combine data 
+    
+    # 3. Save directly to CSV
+    print("Writing to CSV...")
+    save_to_massive_csv(clean_data, filename="usb_security_log_report.csv")
+    
 
