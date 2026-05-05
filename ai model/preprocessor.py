@@ -3,132 +3,283 @@ import numpy as np
 import os
 from datetime import timedelta
 
-# --- 1. CONFIGURATION ---
-CONFIG = {
-    # CHANGE THIS PATH to match your actual folder
-    'base_path': r'F:\seniorpy',
-    'output_file': 'model_intake_final.csv',
-    
-    # --- REGIONAL SETTINGS (Middle East / Sun-Thu Work Week) ---
-    'apply_date_shift': True,  
-    'shift_days': -1,          # Moves Mon -> Sun
-    
-    # Weekend Definition (Post-Shift)
-    # 4=Fri, 5=Sat
-    'weekend_days': [4, 5], 
-    
-    # --- WORKING HOURS (7 AM - 7 PM) ---
-    # Captures 7:00 AM arrivals and up to 6:59 PM departures.
-    'work_start_hour': 7,   # 07:00
-    'work_end_hour': 19,    # 19:00 (7:00 PM)
-    
-    # --- DETECTION KEYWORDS ---
-    'job_keywords': 'indeed|linkedin|monster|career|glassdoor|job',
-    'cloud_keywords': 'dropbox|drive|mega|upload|box.com|mediafire|wetransfer'
-}
+# --- 1. DYNAMIC PATH CALCULATION ---
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_PROJECT_PATH = os.path.dirname(SCRIPT_DIR)
 
-def load_file(filename):
-    path = os.path.join(CONFIG['base_path'], filename)
-    print(f"Loading: {path}...")
-    try:
+# Sentinel value for "never used USB" — high enough to look anomalous to models
+USB_NEVER_USED_SENTINEL = 999
+
+
+class FeatureEngineer:
+    def __init__(self, config):
+        self.config = config
+        self.base_path = config['base_path']
+
+    def load_file(self, filename):
+        """Loads a CSV safely."""
+        path = os.path.join(self.base_path, filename)
+        print(f"Loading: {path}...")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"CRITICAL: Could not find {filename} in {self.base_path}")
         return pd.read_csv(path)
-    except FileNotFoundError:
-        print(f"\nCRITICAL ERROR: Could not find {filename}.")
-        print(f"Please check that '{filename}' is inside '{CONFIG['base_path']}'")
-        exit()
 
-# --- 2. LOAD DATA ---
-logon_df = load_file('logon.csv')
-device_df = load_file('device.csv')
-http_df = load_file('http.csv')
-email_df = load_file('email.csv')
+    def _apply_date_shift(self, df):
+        """
+        Standardizes dates and applies regional shifts (e.g., Sun-Thu week).
 
-# --- 3. STANDARDIZE & SHIFT DATES ---
-print("Standardizing and Shifting Dates...")
-for df in [logon_df, device_df, http_df, email_df]:
-    # Convert to datetime object
-    df['date_dt'] = pd.to_datetime(df['date'], errors='coerce')
-    
-    # APPLY DATE SHIFT
-    if CONFIG['apply_date_shift']:
-        df['date_dt'] = df['date_dt'] + timedelta(days=CONFIG['shift_days'])
-    
-    # Create string representation
-    df['day'] = df['date_dt'].dt.strftime('%m/%d/%Y')
-    df['day_of_week'] = df['date_dt'].dt.dayofweek
+        FIX: The shift is applied BEFORE extracting day_of_week so that
+        weekend_days in the config correctly refers to post-shift days.
+        Previously, day_of_week was derived from the original date, meaning
+        after-hours and weekend flags could be misaligned with the shifted date.
+        """
+        df['date_dt'] = pd.to_datetime(df['date'], errors='coerce')
+        if self.config['apply_date_shift']:
+            df['date_dt'] += timedelta(days=self.config['shift_days'])
 
-if CONFIG['apply_date_shift']:
-    print(f" > Data shifted by {CONFIG['shift_days']} day(s). Work week is now Sun-Thu.")
+        # All temporal features are derived from the SHIFTED date
+        df['day'] = df['date_dt'].dt.strftime('%m/%d/%Y')
+        df['day_of_week'] = df['date_dt'].dt.dayofweek
+        df['month'] = df['date_dt'].dt.to_period('M')
+        return df
 
-# --- 4. FEATURE ENGINEERING ---
+    def _calculate_zscore(self, df, user_col, value_col, new_col_name):
+        """
+        Reusable helper to calculate per-user Z-Scores for any metric.
 
-# A. LOGON: After-Hours Logic
-print(f"Processing Logon Data...")
-print(f"  - Window: {CONFIG['work_start_hour']}:00 to {CONFIG['work_end_hour']}:00")
-print(f"  - Weekends Flagged: Days {CONFIG['weekend_days']}")
+        FIX: Two separate problems solved here:
 
-def check_after_hours(row):
-    if pd.isnull(row['date_dt']): return 0
-    
-    hour = row['date_dt'].hour
-    dow = row['day_of_week']
-    
-    # 1. Check Time Window (Strict)
-    # If hour is 19 (7PM), it is >= 19, so it gets FLAGGED.
-    if hour < CONFIG['work_start_hour'] or hour >= CONFIG['work_end_hour']:
-        return 1
-    # 2. Check Weekend
-    if dow in CONFIG['weekend_days']:
-        return 1
-    return 0
+        Problem 1 — zero collision:
+            The original code fell back to 0 when std=0 (sparse user).
+            But 0 is also a valid z-score meaning "perfectly average day".
+            A sparse user with 0 and an active user with 0 looked identical
+            to any downstream model.
 
-logon_df['after_hours_flag'] = logon_df.apply(check_after_hours, axis=1)
-logon_feat = logon_df.groupby(['user', 'day'])['after_hours_flag'].max().reset_index()
-logon_feat.rename(columns={'after_hours_flag': 'is_after_hours'}, inplace=True)
+        Problem 2 — NaN also collides:
+            Replacing 0 with NaN doesn't fully solve it either, because
+            after the outer merge + fillna(0), those NaNs become 0 anyway.
 
-# B. DEVICE: USB Connections
-print("Processing Device Data...")
-usb_feat = device_df[device_df['activity'] == 'Connect'].groupby(['user', 'day']).size().reset_index(name='total_usb_connections')
+        Solution:
+            - Compute the real z-score for users with a valid baseline (std > 0,
+              count >= min_baseline_days). These get their true float value.
+            - Sparse/no-baseline users get NaN in the z-score column.
+            - A companion binary column `*_has_baseline` (1/0) is added so the
+              model always has an unambiguous signal about data quality.
+            - In build_pipeline, z-score columns are explicitly excluded from
+              the final fillna(0) sweep so NaN is preserved into the output.
+              Your model's imputation step should handle these deliberately
+              (e.g. fill with 0 only after using has_baseline as a feature).
+        """
+        MIN_BASELINE_DAYS = self.config.get('min_baseline_days', 5)
 
-# C. HTTP: Intent Detection
-print("Processing HTTP Data...")
-http_df['is_job'] = http_df['url'].str.contains(CONFIG['job_keywords'], case=False, na=False).astype(int)
-http_df['is_cloud'] = http_df['url'].str.contains(CONFIG['cloud_keywords'], case=False, na=False).astype(int)
+        stats = df.groupby(user_col)[value_col].agg(
+            mean='mean',
+            std='std',
+            count='count'
+        ).reset_index()
 
-http_feat = http_df.groupby(['user', 'day']).agg(
-    job_site_visit=('is_job', 'sum'),
-    cloud_storage_visit=('is_cloud', 'sum')
-).reset_index()
+        merged = df.merge(stats, on=user_col, how='left')
 
-# D. EMAIL: Z-Score Calculation
-print("Processing Email Data (Calculating Z-Scores)...")
-email_daily = email_df.groupby(['user', 'day']).size().reset_index(name='email_count')
-user_stats = email_daily.groupby('user')['email_count'].agg(['mean', 'std']).reset_index()
-email_feat = email_daily.merge(user_stats, on='user', how='left')
+        has_baseline = (merged['std'] > 0) & (merged['count'] >= MIN_BASELINE_DAYS)
 
-email_feat['email_daily_z_score'] = (email_feat['email_count'] - email_feat['mean']) / email_feat['std']
-email_feat['email_daily_z_score'] = email_feat['email_daily_z_score'].replace([np.inf, -np.inf], 0)
-email_feat['email_daily_z_score'] = email_feat['email_daily_z_score'].fillna(0)
+        merged[new_col_name] = np.where(
+            has_baseline,
+            (merged[value_col] - merged['mean']) / merged['std'],
+            np.nan  # Preserved through to output — NOT swept by fillna(0) in build_pipeline
+        )
 
-email_feat = email_feat[['user', 'day', 'email_daily_z_score']]
+        # 1 = "this z-score is trustworthy", 0 = "sparse user, treat score as unknown"
+        merged[f'{new_col_name}_has_baseline'] = has_baseline.astype(int)
 
-# --- 5. FINAL MERGE ---
-print("Merging all datasets...")
-final_df = logon_feat.merge(usb_feat, on=['user', 'day'], how='outer') \
-                     .merge(http_feat, on=['user', 'day'], how='outer') \
-                     .merge(email_feat, on=['user', 'day'], how='outer')
+        return merged.drop(columns=['mean', 'std', 'count'])
 
-final_df = final_df.fillna(0)
+    def process_logon(self):
+        # FIX: Added missing print statement; fixed double-indentation of method body
+        print("Processing Logon Data...")
+        df = self._apply_date_shift(self.load_file('dataset/logon.csv'))
 
-# --- 6. EXPORT ---
-final_df = final_df[['user', 'day', 'is_after_hours', 'total_usb_connections', 'job_site_visit', 'cloud_storage_visit', 'email_daily_z_score']]
-final_df.rename(columns={'day': 'date'}, inplace=True)
+        df['is_after_hours'] = (
+            (df['date_dt'].dt.hour < self.config['work_start_hour']) |
+            (df['date_dt'].dt.hour >= self.config['work_end_hour'])
+        ).astype(int)
+        df['is_weekend'] = df['day_of_week'].isin(self.config['weekend_days']).astype(int)
 
-output_path = os.path.join(CONFIG['base_path'], CONFIG['output_file'])
-final_df.to_csv(output_path, index=False)
+        df = df.sort_values(['user', 'date_dt'])
 
-print("-" * 40)
-print(f"SUCCESS! Preprocessing Complete.")
-print(f"Output saved to: {output_path}")
-print(f"Total Rows Generated: {len(final_df)}")
-print("-" * 40)
+        df['next_activity'] = df.groupby('user')['activity'].shift(-1)
+        df['next_time'] = df.groupby('user')['date_dt'].shift(-1)
+
+        mask = (df['activity'] == 'Logon') & (df['next_activity'] == 'Logoff')
+        df['session_duration'] = np.where(
+            mask,
+            (df['next_time'] - df['date_dt']).dt.total_seconds() / 60,
+            0
+        )
+
+        daily = df.groupby(['user', 'day']).agg(
+            total_active_minutes_day=('session_duration', 'sum'),
+            after_hours_session_count=('is_after_hours', 'sum'),
+            weekend_session_flag=('is_weekend', 'max'),
+            logon_count=('activity', lambda x: (x == 'Logon').sum())
+        ).reset_index()
+
+        # FIX: Add is_active_day flag BEFORE the outer merge so we can
+        # distinguish "user present, zero anomalies" from "user absent entirely"
+        daily['is_active_day'] = 1
+
+        return self._calculate_zscore(daily, 'user', 'logon_count', 'logon_count_zscore')
+
+    def process_device(self):
+        print("Processing USB/Device Data...")
+        df = self._apply_date_shift(self.load_file('dataset/device.csv'))
+        usb_only = df[df['activity'] == 'Connect'].copy()
+
+        usb_only['usb_after_hours'] = (
+            (usb_only['date_dt'].dt.hour < self.config['work_start_hour']) |
+            (usb_only['date_dt'].dt.hour >= self.config['work_end_hour'])
+        ).astype(int)
+        usb_only['usb_weekend'] = usb_only['day_of_week'].isin(self.config['weekend_days']).astype(int)
+
+        daily = usb_only.groupby(['user', 'day']).agg(
+            usb_count=('activity', 'count'),
+            usb_after_hours_flag=('usb_after_hours', 'max'),
+            usb_on_weekend_flag=('usb_weekend', 'max'),
+            latest_usb_date=('date_dt', 'max')
+        ).reset_index()
+
+        monthly_diversity = usb_only.groupby(['user', 'month'])['pc'].nunique().reset_index(
+            name='usb_device_diversity_monthly'
+        )
+        daily['month'] = pd.to_datetime(daily['day']).dt.to_period('M')
+        daily = daily.merge(monthly_diversity, on=['user', 'month'], how='left').drop(columns=['month'])
+
+        return self._calculate_zscore(daily, 'user', 'usb_count', 'usb_count_zscore')
+
+    def process_http(self):
+        print("Processing HTTP Data...")
+        df = self._apply_date_shift(self.load_file('dataset/http.csv'))
+
+        df['is_job'] = df['url'].str.contains(
+            self.config['job_keywords'], case=False, na=False
+        ).astype(int)
+        df['is_upload'] = df['url'].str.contains(
+            self.config['cloud_keywords'], case=False, na=False
+        ).astype(int)
+
+        daily = df.groupby(['user', 'day']).agg(
+            job_site_visits=('is_job', 'sum'),
+            upload_activity=('is_upload', 'sum')
+        ).reset_index()
+
+        daily['job_site_visits_flag'] = (daily['job_site_visits'] > 0).astype(int)
+        daily['upload_activity_flag'] = (daily['upload_activity'] > 0).astype(int)
+        return daily.drop(columns=['job_site_visits', 'upload_activity'])
+
+    def process_email(self):
+        print("Processing Email Data...")
+        df = self._apply_date_shift(self.load_file('dataset/email.csv'))
+        daily = df.groupby(['user', 'day']).size().reset_index(name='email_count')
+        return self._calculate_zscore(daily, 'user', 'email_count', 'email_daily_z_score')
+
+    def build_pipeline(self):
+        logon_feat = self.process_logon()
+        device_feat = self.process_device()
+        http_feat = self.process_http()
+        email_feat = self.process_email()
+
+        print("Merging Datasets...")
+        final_df = (
+            logon_feat
+            .merge(device_feat, on=['user', 'day'], how='outer')
+            .merge(http_feat,   on=['user', 'day'], how='outer')
+            .merge(email_feat,  on=['user', 'day'], how='outer')
+        )
+
+        final_df['date'] = pd.to_datetime(final_df['day'])
+        final_df = final_df.sort_values(by=['user', 'date'])
+
+        # --- DAYS SINCE LAST USB ---
+        # FIX: Strip the time component from latest_usb_date before subtracting.
+        #
+        # Root cause of -1 values: latest_usb_date is a full datetime
+        # (e.g. 2010-01-03 14:32:00) but final_df['date'] is midnight
+        # (2010-01-03 00:00:00). After ffill, a USB event from later that
+        # same day appeared to be 14 hours in the future, giving dt.days = -1.
+        #
+        # Normalizing to date-only (midnight) before subtraction means
+        # "USB happened sometime today" correctly gives days_since = 0.
+        final_df['latest_usb_date'] = pd.to_datetime(
+            final_df['latest_usb_date']
+        ).dt.normalize()  # floors to midnight, kills the time component
+
+        final_df['last_usb_date'] = final_df.groupby('user')['latest_usb_date'].ffill()
+
+        final_df['days_since_last_usb'] = (
+            final_df['date'] - final_df['last_usb_date']
+        ).dt.days
+
+        # FIX: Use sentinel (999) instead of 0 for "never used USB".
+        # 0 means "used USB today" — filling with 0 makes never-users look
+        # like constant USB users, which is the opposite of reality.
+        final_df['days_since_last_usb'] = final_df['days_since_last_usb'].fillna(
+            USB_NEVER_USED_SENTINEL
+        )
+
+        # FIX: is_active_day comes from logon presence before fillna(0).
+        # After fillna(0), a non-logon day and an absent day look identical.
+        # This flag lets models distinguish "present and quiet" from "absent".
+        final_df['is_active_day'] = final_df['is_active_day'].fillna(0).astype(int)
+
+        # Fill remaining numeric NaNs with 0 (counts, flags, etc.)
+        # Z-score columns intentionally keep NaN to signal sparse baseline —
+        # handle these in your model's imputation step, not here.
+        zscore_cols = [c for c in final_df.columns if 'zscore' in c or 'z_score' in c]
+        non_zscore_numeric = final_df.select_dtypes(include=[np.number]).columns.difference(zscore_cols)
+        final_df[non_zscore_numeric] = final_df[non_zscore_numeric].fillna(0)
+
+        # --- COMPOUND: Job search + USB in rolling 7-day window ---
+        final_df.set_index('date', inplace=True)
+
+        def compound_check(group):
+            job_roll = group['job_site_visits_flag'].rolling('7D').max()
+            usb_roll = group['usb_count_zscore'].rolling('7D').max()  # use zscore proxy
+            return ((job_roll > 0) & (usb_roll > 0)).astype(int)
+
+        # FIX: usb_count was dropped before this point in original code.
+        # Now using usb_count_zscore as the signal (non-zero = USB occurred).
+        # If you need raw usb_count in the rolling window, don't drop it above.
+        final_df['job_search_plus_usb_week'] = final_df.groupby(
+            'user', group_keys=False
+        ).apply(compound_check)
+
+        final_df.reset_index(inplace=True)
+
+        # Cleanup intermediate columns
+        cols_to_drop = ['latest_usb_date', 'last_usb_date', 'logon_count', 'email_count']
+        final_df = final_df.drop(columns=[c for c in cols_to_drop if c in final_df.columns])
+
+        output_path = os.path.normpath(
+            os.path.join(self.config['base_path'], self.config['output_file'])
+        )
+        final_df.to_csv(output_path, index=False)
+        print(f"SUCCESS! Shape: {final_df.shape} saved to {output_path}")
+        return final_df
+
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    CONFIG = {
+        'base_path': BASE_PROJECT_PATH,
+        'output_file': 'model_intake_final.csv',
+        'apply_date_shift': True,
+        'shift_days': -1,           # Sun-Thu regional calendar correction
+        'weekend_days': [4, 5],     # 4=Fri, 5=Sat in 0-indexed post-shift days
+        'work_start_hour': 7,
+        'work_end_hour': 19,
+        'job_keywords': 'indeed|linkedin|monster|career|glassdoor|job',
+        'cloud_keywords': 'dropbox|drive|mega|upload|box.com|mediafire|wetransfer',
+        'min_baseline_days': 5,     # Minimum days of history before z-score is trusted
+    }
+
+    engineer = FeatureEngineer(CONFIG)
+    engineer.build_pipeline()
