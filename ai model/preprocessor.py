@@ -254,6 +254,40 @@ class FeatureEngineer:
 
         final_df.reset_index(inplace=True)
 
+        # --- COMPOUND: Triple signal — job search + USB + cloud upload same day ---
+        # Global, population-level feature — no per-user history needed.
+        # Safe to use when deploying a CERT-trained model to local data.
+        #
+        # Rationale: each signal alone is noisy (job sites ~49% of days,
+        # uploads ~34%). All three converging on the same day is rare and
+        # specifically matches "preparing to leave": researching jobs while
+        # simultaneously exfiltrating via USB and cloud upload.
+        #
+        # Unlike after_hours_total (which just flags consistent night owls),
+        # this requires behavioral convergence across three independent channels.
+        final_df['triple_signal_day'] = (
+            (final_df['job_site_visits_flag'] == 1) &
+            (final_df['usb_count_zscore'].fillna(0) > 0) &
+            (final_df['upload_activity_flag'] == 1)
+        ).astype(int)
+
+        # Rolling 7-day version: did all three happen within the same week?
+        # Catches cases where exfiltration is spread across a few days
+        # rather than concentrated on one day.
+        final_df.set_index('date', inplace=True)
+
+        def triple_week_check(group):
+            job_roll    = group['job_site_visits_flag'].rolling('7D').max()
+            usb_roll    = group['usb_count_zscore'].fillna(0).rolling('7D').max()
+            upload_roll = group['upload_activity_flag'].rolling('7D').max()
+            return ((job_roll > 0) & (usb_roll > 0) & (upload_roll > 0)).astype(int)
+
+        final_df['triple_signal_week'] = final_df.groupby(
+            'user', group_keys=False
+        ).apply(triple_week_check)
+
+        final_df.reset_index(inplace=True)
+
         # Cleanup intermediate columns
         cols_to_drop = ['latest_usb_date', 'last_usb_date', 'logon_count', 'email_count']
         final_df = final_df.drop(columns=[c for c in cols_to_drop if c in final_df.columns])
@@ -283,3 +317,4 @@ if __name__ == "__main__":
 
     engineer = FeatureEngineer(CONFIG)
     engineer.build_pipeline()
+    
