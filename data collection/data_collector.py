@@ -256,7 +256,7 @@ if __name__ == "__main__":
     
     # 2. Filter out duplicates and rapid connection bounces
     print("Filtering duplicates and noise...")
-    clean_data = filter_usb_duplicates(raw_data) # refine_usb_only(raw_data)needs to move to combine data 
+    clean_data = filter_usb_duplicates(raw_data) 
     
     # 3. Save directly to CSV
     print("Writing to CSV...")
