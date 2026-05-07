@@ -37,4 +37,4 @@ def get_r42_insider_data(target_path):
         print(f"Error: Missing column {e}")
 
 if __name__ == "__main__":
-    get_r42_insider_data(csv_path)
+    get_r42_insider_data(csv_path) 

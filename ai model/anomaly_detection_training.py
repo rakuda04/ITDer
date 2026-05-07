@@ -39,7 +39,7 @@ import pandas as pd
 import shap
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import (precision_score, recall_score, roc_auc_score)
-from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
@@ -102,8 +102,8 @@ CONFIG = {
     'rf_max_depth'     : 8,       # shallow = better generalization to local data
 
     # Combined score weights (must sum to 1.0)
-    'weight_supervised'  : 0.5,
-    'weight_unsupervised': 0.5,
+    'weight_supervised'  : 0.7,
+    'weight_unsupervised': 0.3,
 
     # Report
     'report_top_n'       : 20,
@@ -236,6 +236,103 @@ def run_supervised(X, df, feature_cols):
         n_jobs        = -1,
         class_weight  = 'balanced'
     )
+
+    # ── USER-LEVEL HELD-OUT EVALUATION ──────────────────────────────────────
+    # Split by USER, not by row. This is the honest deployment estimate.
+    #
+    # Why this matters:
+    #   Row-level split: model trains on CQW0652's Monday, tests on their Friday.
+    #   It recognizes the same person — not generalization, just memory.
+    #
+    #   User-level split: model trains on users 1-800, tests on users 801-1000.
+    #   Test users are completely new people the model has NEVER seen.
+    #   This is exactly what happens when you deploy locally.
+    #
+    # We run 5 different random seeds and average results because with only
+    # ~14 insiders in each test split, a single run is too noisy to trust.
+    print(f"\n  ══ USER-LEVEL HELD-OUT EVALUATION (honest deployment estimate) ══")
+    print(f"  Splitting by USER so test users are completely unseen during training.")
+    print(f"  Running 5 seeds and averaging to reduce noise from small insider count.\n")
+
+    all_users    = df['user'].unique()
+    insider_users = set(df[df['insider_label'] > 0]['user'].unique())
+    normal_users  = [u for u in all_users if u not in insider_users]
+    insider_list  = list(insider_users)
+
+    user_auc_scores      = []
+    user_precision_scores = []
+    user_hits_list        = []
+
+    for seed in range(5):
+        rng = np.random.RandomState(seed)
+
+        # Shuffle and split insiders and normal users separately
+        # so each test split always has some insiders
+        rng.shuffle(insider_list)
+        rng.shuffle(normal_users)
+
+        n_test_insiders = max(1, int(len(insider_list) * 0.2))
+        n_test_normal   = int(len(normal_users) * 0.2)
+
+        test_users  = set(insider_list[:n_test_insiders] + normal_users[:n_test_normal])
+        train_users = set(all_users) - test_users
+
+        train_mask = df['user'].isin(train_users)
+        test_mask  = df['user'].isin(test_users)
+
+        X_tr = X[train_mask].values
+        y_tr = y[train_mask]
+        X_te = X[test_mask].values
+        y_te = y[test_mask]
+
+        if y_tr.sum() == 0 or y_te.sum() == 0:
+            continue  # skip degenerate splits
+
+        sw_tr = compute_sample_weight('balanced', y_tr)
+
+        rf_u = RandomForestClassifier(
+            n_estimators     = CONFIG['rf_n_estimators'],
+            max_depth        = CONFIG['rf_max_depth'],
+            min_samples_leaf = 10,
+            random_state     = seed,
+            n_jobs           = -1,
+            class_weight     = 'balanced'
+        )
+        rf_u.fit(X_tr, y_tr, sample_weight=sw_tr)
+        te_proba = rf_u.predict_proba(X_te)[:, 1]
+
+        try:
+            auc = roc_auc_score(y_te, te_proba)
+        except Exception:
+            auc = 0.5
+        user_auc_scores.append(auc)
+
+        # User-level precision @20 within test users only
+        test_df_u = df[test_mask].copy()
+        test_df_u['u_score'] = te_proba
+        user_scores_u = test_df_u.groupby('user')['u_score'].max()
+        top20_u       = user_scores_u.nlargest(20).index.tolist()
+        hits_u        = [u for u in top20_u if u in insider_users]
+        prec_u        = len(hits_u) / 20
+        user_precision_scores.append(prec_u)
+        user_hits_list.append(hits_u)
+
+        n_test_ins_actual = sum(1 for u in test_users if u in insider_users)
+        print(f"  Seed {seed}: test={len(test_users)} users "
+              f"({n_test_ins_actual} insiders) | "
+              f"AUC={auc:.3f} | Precision@20={prec_u*100:.0f}% "
+              f"({len(hits_u)}/20)")
+
+    mean_auc  = np.mean(user_auc_scores)
+    mean_prec = np.mean(user_precision_scores)
+    std_prec  = np.std(user_precision_scores)
+
+    print(f"\n  ── Average across 5 seeds ──")
+    print(f"  ROC-AUC        : {mean_auc:.3f} ± {np.std(user_auc_scores):.3f}")
+    print(f"  Precision @20  : {mean_prec*100:.1f}% ± {std_prec*100:.1f}%")
+    print(f"  ← THIS is your honest estimate for new unseen users locally.")
+    print(f"  ← If this is 30-60%, the model has learned real patterns.")
+    print(f"  ← If this is near 5%, the model only memorized CERT users.")
 
     print(f"\nRunning {CONFIG['cv_folds']}-fold stratified cross-validation...")
     cv = StratifiedKFold(n_splits=CONFIG['cv_folds'], shuffle=True, random_state=42)
