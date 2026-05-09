@@ -1,11 +1,4 @@
-usb_security_log_report.csv
-final_anomaly_report.csv
-dataset/
-anomaly_report_daily.csv
-anomaly_report_users.csv
-model_intake_final.csv
-model_intake_finalv1.csv
-old/
-shap_values.csv
 cert_thresholds.json
-/saved_models
+cert_pipeline/dataset
+cert_pipeline/output
+local_pipeline/output
