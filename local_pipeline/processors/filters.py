@@ -6,12 +6,14 @@
 # ============================================================
 
 import re
+from datetime import timedelta
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 
 _USB_PATTERN = re.compile(config.USB_DEVICE_PATTERN, re.IGNORECASE)
+_STARTUP_DEDUP_WINDOW = timedelta(seconds=config.STARTUP_DEDUP_WINDOW_SEC)
 
 
 def filter_usb_only(events: list[dict]) -> list[dict]:
@@ -37,7 +39,7 @@ def filter_usb_duplicates(events: list[dict]) -> list[dict]:
       Condition A — identical category within USB_IDENTICAL_WINDOW_SEC seconds
       Condition B — phantom bounce: CONNECT → DISCONNECT within
                     USB_PHANTOM_BOUNCE_SEC seconds
-    
+
     Security/Browser events are never touched.
     """
     if not events:
@@ -76,3 +78,38 @@ def filter_usb_duplicates(events: list[dict]) -> list[dict]:
         unique.append(entry)
 
     return unique
+
+
+def filter_startup_noise(events: list[dict]) -> list[dict]:
+    """
+    1. Keep only ONE STARTUP (6005) per boot — drops any dupes within
+       STARTUP_DEDUP_WINDOW_SEC (defensive; 6005 normally fires once).
+    2. Drop LOGON (4624) events that fire within STARTUP_DEDUP_WINDOW_SEC
+       of a STARTUP — those are service/session-manager logons, not the
+       interactive user logon.
+
+    All other event types pass through untouched.
+    """
+    sorted_events = sorted(events, key=lambda x: x["timestamp"])
+
+    last_startup_ts = None
+    out = []
+
+    for ev in sorted_events:
+        activity = ev.get("activity", "")
+
+        if activity == "STARTUP":
+            if (last_startup_ts is None
+                    or (ev["timestamp"] - last_startup_ts) > _STARTUP_DEDUP_WINDOW):
+                last_startup_ts = ev["timestamp"]
+                out.append(ev)
+            # else: duplicate 6005 within same boot window → drop
+            continue
+
+        if activity == "LOGON" and last_startup_ts is not None:
+            if (ev["timestamp"] - last_startup_ts) <= _STARTUP_DEDUP_WINDOW:
+                continue  # service/auto logon noise right after boot → drop
+
+        out.append(ev)
+
+    return out

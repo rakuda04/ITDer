@@ -45,48 +45,22 @@ def _safe_copy(src: Path) -> str:
 def _get_browser_paths() -> dict[str, list[Path]]:
     home = Path.home()
 
-    if os.name == "nt":  # Windows
-        local   = Path(os.environ.get("LOCALAPPDATA", home / "AppData/Local"))
-        roaming = Path(os.environ.get("APPDATA",      home / "AppData/Roaming"))
-        return {
-            "Chrome":  [local   / "Google/Chrome/User Data/Default/History"],
-            "Edge":    [local   / "Microsoft/Edge/User Data/Default/History"],
-            "Brave":   [local   / "BraveSoftware/Brave-Browser/User Data/Default/History"],
-            "Opera":   [roaming / "Opera Software/Opera Stable/History"],
-            "Vivaldi": [local   / "Vivaldi/User Data/Default/History"],
-            "Firefox": [
-                *(roaming / "Mozilla/Firefox/Profiles").glob("*.default*/places.sqlite"),
-                *(roaming / "Mozilla/Firefox/Profiles").glob("*.default-release*/places.sqlite"),
-            ],
-        }
+     # Windows
+    local   = Path(os.environ.get("LOCALAPPDATA", home / "AppData/Local"))
+    roaming = Path(os.environ.get("APPDATA",      home / "AppData/Roaming"))
+    return {
+        "Chrome":  [local   / "Google/Chrome/User Data/Default/History"],
+        "Edge":    [local   / "Microsoft/Edge/User Data/Default/History"],
+        "Brave":   [local   / "BraveSoftware/Brave-Browser/User Data/Default/History"],
+        "Opera":   [roaming / "Opera Software/Opera Stable/History"],
+        "Vivaldi": [local   / "Vivaldi/User Data/Default/History"],
+        "Firefox": [
+            *(roaming / "Mozilla/Firefox/Profiles").glob("*.default*/places.sqlite"),
+            *(roaming / "Mozilla/Firefox/Profiles").glob("*.default-release*/places.sqlite"),
+        ],
+    }
 
-    elif hasattr(os, "uname") and os.uname().sysname == "Darwin":  # macOS
-        app = home / "Library/Application Support"
-        return {
-            "Chrome":  [app / "Google/Chrome/Default/History"],
-            "Edge":    [app / "Microsoft Edge/Default/History"],
-            "Brave":   [app / "BraveSoftware/Brave-Browser/Default/History"],
-            "Opera":   [app / "com.operasoftware.Opera/History"],
-            "Vivaldi": [app / "Vivaldi/Default/History"],
-            "Firefox": [
-                *(home / "Library/Application Support/Firefox/Profiles").glob("*.default*/places.sqlite"),
-                *(home / "Library/Application Support/Firefox/Profiles").glob("*.default-release*/places.sqlite"),
-            ],
-        }
 
-    else:  # Linux
-        cfg = home / ".config"
-        return {
-            "Chrome":  [cfg / "google-chrome/Default/History"],
-            "Edge":    [cfg / "microsoft-edge/Default/History"],
-            "Brave":   [cfg / "BraveSoftware/Brave-Browser/Default/History"],
-            "Opera":   [cfg / "opera/History"],
-            "Vivaldi": [cfg / "vivaldi/Default/History"],
-            "Firefox": [
-                *(home / ".mozilla/firefox").glob("*.default*/places.sqlite"),
-                *(home / ".mozilla/firefox").glob("*.default-release*/places.sqlite"),
-            ],
-        }
 
 
 # ── per-browser query functions ──────────────────────────────

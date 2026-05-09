@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
 from collectors.windows_events import get_umdf_events, get_security_events
 from collectors.browser_history import get_browser_history
-from processors.filters import filter_usb_only, filter_usb_duplicates
+from processors.filters import filter_usb_only, filter_usb_duplicates, filter_startup_noise
 
 
 # ── collection ───────────────────────────────────────────────
@@ -41,19 +41,9 @@ def _collect(days: int) -> list[dict]:
     print("[pipeline] Collecting browser history...")
     browser = get_browser_history(days=days)
 
-    # ── startup marker (was previously buried in get_security_events) ──
-    # Explicit and visible here; easy to remove or reconfigure.
-    import os
-    startup_marker = {
-        "timestamp": datetime.now().astimezone(),
-        "source":    "Security",
-        "event_id":  4624,
-        "activity":  "LOGON (script-run marker)",
-        "user":      os.getlogin(),
-        "logon_id":  "n/a",
-    }
 
-    combined = umdf_raw + security +  [startup_marker] # browser +
+
+    combined = umdf_raw + security  + browser # 
     combined.sort(key=lambda x: x["timestamp"])
     return combined
 
@@ -62,12 +52,19 @@ def _collect(days: int) -> list[dict]:
 
 def _process(events: list[dict]) -> list[dict]:
     """
-    Apply filters.  Order matters: filter to USB-only first,
-    then deduplicate bursts.
+    Apply filters.  Order matters:
+      1. Suppress boot-time LOGON noise around STARTUP events
+      2. Filter to USB-only
+      3. Deduplicate USB bursts
     """
+    print("[pipeline] Filtering startup noise...")
+    events = filter_startup_noise(events)
+
     print("[pipeline] Filtering USB events...")
     usb_only = filter_usb_only(events)
-    clean    = filter_usb_duplicates(usb_only)
+
+    print("[pipeline] Deduplicating USB bursts...")
+    clean = filter_usb_duplicates(usb_only)
     return clean
 
 

@@ -4,16 +4,22 @@
 # ============================================================
 
 # How many days back to pull events (applies to all collectors)
-DAYS_BACK = 1
+DAYS_BACK = 15
 
 # Output file produced by pipeline.py
 from pathlib import Path
-OUTPUT_FILENAME = Path(__file__).parent / "activity_report.csv"
+OUTPUT_FILENAME = Path(__file__).resolve().parent / "output" / "local_activity.csv"
+
 # ── USB duplicate-filter thresholds ─────────────────────────
 # Two events of the same category within this many seconds = duplicate
 USB_IDENTICAL_WINDOW_SEC = 1.5
 # A CONNECT followed by a DISCONNECT within this many seconds = phantom bounce
 USB_PHANTOM_BOUNCE_SEC = 1.0
+
+# ── Startup dedup window ─────────────────────────────────────
+# LOGON (4624) events fired within this many seconds after a STARTUP
+# are service/session-manager noise — they get suppressed.
+STARTUP_DEDUP_WINDOW_SEC = 60
 
 # ── Windows Event IDs ────────────────────────────────────────
 UMDF_EVENT_IDS = [2003, 2100, 2102]   # 2003=connect, 2100=surprise-remove, 2102=graceful-exit
@@ -24,8 +30,13 @@ SECURITY_EVENT_CONFIG = {
         "labels": {4624: "LOGON", 4800: "LOCK", 4801: "UNLOCK"},
     },
     "System": {
-        "ids": [1074, 42, 107],
-        "labels": {1074: "LOGOFF(shutdown)", 42: "SLEEP", 107: "WAKE"},
+        "ids": [1074, 42, 107, 6005],
+        "labels": {
+            1074: "LOGOFF(shutdown)",
+            42:   "SLEEP",
+            107:  "WAKE",
+            6005: "LOGON(STARTUP)",
+        },
     },
 }
 
@@ -38,6 +49,5 @@ CSV_FIELDNAMES = [
     "timestamp", "source", "event_id",
     "activity", "category",
     "device", "user", "logon_id",
-    # browser-specific columns (empty for Windows events)
     "browser", "url", "title", "visit_count",
 ]
