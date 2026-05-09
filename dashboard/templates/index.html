@@ -4,664 +4,514 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>ITDer — Insider Threat Detection</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/vis-network.min.js"></script>
-<link  href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.css" rel="stylesheet"/>
 <style>
-/* ══════════════════════════════════════════════════════
-   RESET & FONTS
-══════════════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:        #07090f;
-  --bg2:       #0b0f1a;
-  --bg3:       #0e1520;
-  --border:    #142030;
-  --border2:   #1a2e40;
-  --red:       #e74c3c;
-  --orange:    #e67e22;
-  --yellow:    #f1c40f;
-  --cyan:      #3ad4f8;
-  --green:     #2ecc71;
-  --text:      #8ab4c4;
-  --text2:     #5a8090;
-  --text3:     #2a5060;
-  --sidebar-w: 72px;
+  --bg:      #0a0e17;
+  --bg2:     #0d1320;
+  --bg3:     #101828;
+  --border:  #1a3040;
+  --border2: #1e3a50;
+  --red:     #e74c3c;
+  --orange:  #e67e22;
+  --cyan:    #3ad4f8;
+  --green:   #2ecc71;
+  --text:    #ffffff;
+  --text2:   #ffffff;
+  --text3:   #ffffffbb;
+  --sb-w:    80px;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);
-          font-family:'Share Tech Mono',monospace;font-size:13px;overflow:hidden}
-
-/* ══════════════════════════════════════════════════════
-   LAYOUT
-══════════════════════════════════════════════════════ */
+          font-family:"Source Code Pro",monospace;font-size:13px;overflow:hidden}
 #app{display:flex;height:100vh;width:100vw}
 
-/* ── Sidebar ── */
+/* ══ SIDEBAR ══ */
 #sidebar{
-  width:var(--sidebar-w);min-width:var(--sidebar-w);
-  background:#090c14;
-  border-right:1px solid var(--border);
+  width:var(--sb-w);min-width:var(--sb-w);
+  /* Match screenshot: dark teal-navy top fading to dark olive-green bottom */
+  background:#45400a;
+  border-right:1px solid #5a5510;
   display:flex;flex-direction:column;align-items:center;
-  padding:14px 0;gap:8px;
-  z-index:100;
+  padding:14px 0 20px;gap:10px;z-index:100;
 }
 #logo-wrap{
-  width:50px;height:50px;border-radius:13px;margin-bottom:10px;
-  box-shadow:0 0 22px #e05a2bcc,0 0 8px #e05a2b88;
-  border:1.5px solid #e05a2b88;overflow:hidden;flex-shrink:0;
+  width:54px;height:54px;border-radius:14px;overflow:hidden;flex-shrink:0;
+  margin-bottom:6px;
+  border:1.5px solid #c0391b66;
+  box-shadow:0 0 18px #e05a2baa,0 0 6px #e05a2b77;
 }
-#logo-wrap img{width:100%;height:100%;object-fit:cover}
+#logo-wrap img{width:100%;height:100%;object-fit:cover;display:block}
 
+/* Nav button base — inactive = dark blue stroke */
 .nav-btn{
-  width:52px;height:52px;border-radius:13px;
-  background:var(--bg3);border:1px solid var(--border2);
+  width:56px;height:56px;border-radius:14px;
+  background:rgba(8,14,24,0.65);
+  border:1.5px solid #0088ff;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  cursor:pointer;transition:all .18s;user-select:none;gap:2px;
+  cursor:pointer;transition:all .2s;user-select:none;gap:3px;
 }
-.nav-btn .icon{font-size:22px;line-height:1}
-.nav-btn .lbl{font-size:8px;color:var(--text3);letter-spacing:.06em;text-transform:uppercase}
-.nav-btn:hover{border-color:var(--orange);box-shadow:0 0 14px #e67e2255,inset 0 0 10px #e67e2212}
+.nav-btn svg{
+  width:26px;height:26px;fill:none;stroke:#ffffff;
+  stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transition:stroke .2s;
+}
+.nav-btn .lbl{font-size:7.5px;color:#ffffff;letter-spacing:.07em;
+              text-transform:uppercase;transition:color .2s}
+.nav-btn:hover{border-color:#2a5a7a;box-shadow:0 0 10px #1a4a6a33}
+.nav-btn:hover svg{stroke:#ffffff}
+.nav-btn:hover .lbl{color:#ffffff}
+
+/* Active — red glowing stroke */
 .nav-btn.active{
-  background:#1e0c08;border-color:var(--orange);
-  box-shadow:0 0 22px #e05a2bbb,inset 0 0 16px #e05a2b22;
+  background:rgba(28,6,6,0.75);
+  border-color:#ff5e00;
+  box-shadow:
+    0 0 0 1px #ff5e0044,
+    0 0 16px #ff5e00bb,
+    0 0 32px #ff5e0055,
+    inset 0 0 16px #ff5e0022;
 }
-.nav-btn.active .lbl{color:var(--orange)}
+.nav-btn.active svg{stroke:#ff5e00;filter:drop-shadow(0 0 5px #ff5e00)}
+.nav-btn.active .lbl{color:#ff5e00;text-shadow:0 0 8px #ff5e00bb}
 
-/* ── Main ── */
+/* ══ MAIN ══ */
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-
-/* ── Topbar ── */
 #topbar{
-  height:48px;min-height:48px;
-  background:#090c14;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;padding:0 22px;gap:16px;
+  height:46px;min-height:46px;background:#090c14;
+  border-bottom:1px solid #0e2030;
+  display:flex;align-items:center;padding:0 22px;gap:14px;
 }
-#topbar-title{
-  font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;
-  color:var(--cyan);letter-spacing:.12em;text-shadow:0 0 14px #3ad4f888;
-}
-#topbar-sub{font-size:10px;color:var(--text3);letter-spacing:.08em;margin-left:2px}
+#topbar-title{font-size:16px;color:#ffffff;letter-spacing:.16em;
+              text-shadow:0 0 8px #ffffff44}
+#topbar-sub{font-size:9px;color:#ffffffaa;letter-spacing:.1em}
 .topbar-sep{flex:1}
-#clock{font-size:11px;color:var(--text3);letter-spacing:.06em}
-.status-dot{
-  width:7px;height:7px;border-radius:50%;background:var(--green);
-  box-shadow:0 0 8px var(--green);animation:pulse 2s infinite;
-}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#clock{font-size:10px;color:#ffffffaa;letter-spacing:.06em}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--green);
+            box-shadow:0 0 7px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
-/* ── Content area ── */
-#content{flex:1;overflow-y:auto;padding:20px 24px;scrollbar-width:thin;
-         scrollbar-color:var(--border2) var(--bg)}
-#content::-webkit-scrollbar{width:5px}
+#content{flex:1;overflow-y:auto;padding:20px 24px;
+         scrollbar-width:thin;scrollbar-color:var(--border2) var(--bg)}
+#content::-webkit-scrollbar{width:4px}
 #content::-webkit-scrollbar-track{background:var(--bg)}
-#content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
-
-/* ── Pages ── */
+#content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 .page{display:none}.page.active{display:block}
 
-/* ══════════════════════════════════════════════════════
-   PANELS
-══════════════════════════════════════════════════════ */
+/* ══ PANELS ══ */
 .panel{
-  background:var(--bg2);
-  border:1px solid var(--border);
+  background:var(--bg2);border:1px solid var(--border);
   border-radius:6px;padding:18px 22px;margin-bottom:18px;
-  position:relative;
-  box-shadow:0 0 28px #050f1acc,inset 0 0 40px #04080f55;
+  position:relative;box-shadow:0 0 30px #040c18cc,inset 0 0 40px #03080e55;
 }
 .panel::after{
-  content:'';position:absolute;top:0;left:12%;right:12%;height:1px;
-  background:linear-gradient(90deg,transparent,#2a7ab866,transparent);
+  content:"";position:absolute;top:0;left:14%;right:14%;height:1px;
+  background:linear-gradient(90deg,transparent,#2a7ab855,transparent);
 }
-.panel-hdr{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-.panel-title{
-  font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;
-  color:#5ab8d4;letter-spacing:.12em;text-transform:uppercase;
-  text-shadow:0 0 10px #2aa8d844;
-}
-.panel-badge{
-  font-size:10px;color:var(--red);letter-spacing:.06em;
-  border:1px solid #e74c3c44;border-radius:3px;padding:1px 7px;
-  text-shadow:0 0 8px #e74c3c66;
-}
+.panel-hdr{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.panel-title{font-size:13px;color:#ffffff;letter-spacing:.1em;text-transform:uppercase;
+             text-shadow:0 0 10px #ffffff22}
+.panel-badge{font-size:9px;color:#ff5e00;letter-spacing:.06em;
+             border:1px solid #ff5e0066;border-radius:3px;padding:1px 7px}
 
-/* ══════════════════════════════════════════════════════
-   GRID HELPERS
-══════════════════════════════════════════════════════ */
-.row{display:flex;gap:18px}.col{flex:1}
-.col-2{flex:2}.col-3{flex:3}
+/* ══ GRID ══ */
+.row{display:flex;gap:18px;margin-bottom:18px}
+.col{flex:1;min-width:0}.col2{flex:2;min-width:0}
 
-/* ══════════════════════════════════════════════════════
-   STAT CARDS
-══════════════════════════════════════════════════════ */
+/* ══ STAT CARDS ══ */
 .stats-row{display:flex;gap:14px;margin-bottom:18px}
-.stat-card{
-  flex:1;background:var(--bg3);border-radius:5px;padding:16px 18px;
-  border:1px solid var(--border2);position:relative;overflow:hidden;
-}
-.stat-card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:2px;
-}
-.stat-card.blue::before{background:linear-gradient(90deg,transparent,var(--cyan),transparent)}
-.stat-card.red::before {background:linear-gradient(90deg,transparent,var(--red),transparent)}
+.stat-card{flex:1;background:var(--bg3);border-radius:5px;padding:15px 18px;
+           border:1px solid var(--border2);position:relative;overflow:hidden}
+.stat-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px}
+.stat-card.blue::before  {background:linear-gradient(90deg,transparent,var(--cyan),transparent)}
+.stat-card.red::before   {background:linear-gradient(90deg,transparent,var(--red),transparent)}
 .stat-card.orange::before{background:linear-gradient(90deg,transparent,var(--orange),transparent)}
-.stat-label{font-size:9px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase}
-.stat-val{font-family:'Rajdhani',sans-serif;font-size:36px;font-weight:700;margin-top:4px;line-height:1}
-.stat-card.blue   .stat-val{color:var(--cyan);  text-shadow:0 0 20px #3ad4f8aa}
-.stat-card.red    .stat-val{color:var(--red);   text-shadow:0 0 20px #e74c3caa}
-.stat-card.orange .stat-val{color:var(--orange);text-shadow:0 0 20px #e67e22aa}
-.stat-sub{font-size:10px;color:var(--text3);margin-top:2px}
+.stat-label{font-size:9px;color:#ffffffbb;letter-spacing:.14em;text-transform:uppercase}
+.stat-val{font-size:34px;font-weight:700;margin-top:4px;line-height:1}
+.stat-card.blue   .stat-val{color:var(--cyan);  text-shadow:0 0 18px #3ad4f8aa}
+.stat-card.red    .stat-val{color:var(--red);   text-shadow:0 0 18px #e74c3caa}
+.stat-card.orange .stat-val{color:var(--orange);text-shadow:0 0 18px #e67e22aa}
+.stat-sub{font-size:9px;color:#ffffffaa;margin-top:3px}
 
-/* ══════════════════════════════════════════════════════
-   THREAT TABLE
-══════════════════════════════════════════════════════ */
-.model-bar{
-  display:flex;gap:10px;margin-bottom:16px;
-}
+/* ══ MODEL BAR ══ */
+.model-bar{display:flex;gap:8px;margin-bottom:16px}
 .model-btn{
-  padding:6px 16px;border-radius:4px;border:1px solid var(--border2);
-  background:var(--bg3);color:var(--text2);cursor:pointer;
-  font-family:'Share Tech Mono',monospace;font-size:11px;
-  letter-spacing:.06em;transition:all .15s;
+  padding:5px 14px;border-radius:4px;border:1px solid var(--border2);
+  background:var(--bg3);color:#ffffff;cursor:pointer;
+  font-family:"Source Code Pro",monospace;font-size:10px;
+  letter-spacing:.07em;transition:all .15s;
 }
-.model-btn:hover{border-color:var(--cyan);color:var(--cyan)}
-.model-btn.active{
-  background:#0a1e2e;border-color:var(--cyan);color:var(--cyan);
-  box-shadow:0 0 12px #3ad4f844;
-}
+.model-btn:hover{border-color:#ff5e00;color:#ff5e00}
+.model-btn.active{background:#1a0d00;border-color:#ff5e00;color:#ff5e00;
+                  box-shadow:0 0 10px #ff5e0044}
 
+/* ══ TABLE ══ */
 .tbl{width:100%;border-collapse:separate;border-spacing:0 4px}
-.tbl thead th{
-  color:var(--text3);font-weight:400;text-align:left;
-  padding:5px 14px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
-  border-bottom:1px solid var(--border);
-}
-.tbl tbody tr{cursor:default;transition:all .12s}
-.tbl tbody td{
-  padding:10px 14px;color:var(--text);
-  background:var(--bg3);
-  border-top:1px solid var(--border);
-  border-bottom:1px solid var(--border);
-}
-.tbl tbody td:first-child{
-  border-left:2px solid var(--border2);border-radius:4px 0 0 4px;
-}
-.tbl tbody td:last-child{
-  border-right:1px solid var(--border);border-radius:0 4px 4px 0;
-}
-.tbl tbody tr:hover td{background:#0c1a28;border-color:#1a3a5044}
-.tbl tbody tr:hover td:first-child{border-left-color:var(--orange);box-shadow:-2px 0 10px #e67e2244}
+.tbl thead th{color:#ffffffbb;font-weight:400;text-align:left;
+              padding:5px 14px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+              border-bottom:1px solid var(--border)}
+.tbl tbody td{padding:10px 14px;color:#ffffff;background:var(--bg3);
+              border-top:1px solid #45400a;border-bottom:1px solid #45400a;transition:all .12s}
+.tbl tbody td:first-child{border-left:2px solid #45400a;border-radius:4px 0 0 4px}
+.tbl tbody td:last-child{border-right:1px solid #45400a;border-radius:0 4px 4px 0}
+.tbl tbody tr:hover td{background:#1a1200;border-color:#45400a}
+.tbl tbody tr:hover td:first-child{border-left-color:#45400a;box-shadow:-2px 0 6px #45400a88}
+.user-link{color:#ffffff;text-shadow:0 0 8px #ffffff44;text-decoration:underline;text-underline-offset:3px}
+.risk-hi{color:var(--red);   text-shadow:0 0 7px #e74c3c88}
+.risk-md{color:var(--orange);text-shadow:0 0 7px #e67e2288}
+.risk-lo{color:var(--green); text-shadow:0 0 7px #2ecc7188}
+.red-flag{color:var(--red);font-size:9px;background:#200808;
+          border:1px solid #e74c3c44;border-radius:3px;padding:1px 5px;margin-right:4px}
 
-.user-link{color:var(--cyan);text-shadow:0 0 10px #3ad4f866;letter-spacing:.02em}
-.risk-hi{color:var(--red);  text-shadow:0 0 8px #e74c3c88}
-.risk-md{color:var(--orange);text-shadow:0 0 8px #e67e2288}
-.risk-lo{color:var(--green); text-shadow:0 0 8px #2ecc7188}
-.red-flag{color:var(--red);font-size:10px;
-          background:#2a0808;border:1px solid #e74c3c44;
-          border-radius:3px;padding:1px 6px;letter-spacing:.04em}
-
-/* ══════════════════════════════════════════════════════
-   CHARTS
-══════════════════════════════════════════════════════ */
+/* ══ CHARTS ══ */
 .chart-wrap{position:relative;width:100%}
 canvas{display:block;width:100%!important}
+.pie-legend{margin-top:12px;display:flex;flex-direction:column;gap:7px}
+.pie-legend-item{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--text)}
+.pie-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 
-/* ══════════════════════════════════════════════════════
-   PIE LEGEND
-══════════════════════════════════════════════════════ */
-.pie-legend{margin-top:14px;display:flex;flex-direction:column;gap:8px}
-.pie-legend-item{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text)}
-.pie-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-
-/* ══════════════════════════════════════════════════════
-   GRAPH
-══════════════════════════════════════════════════════ */
-#graph-container{width:100%;height:680px;background:var(--bg);
-                 border:1px solid var(--border);border-radius:5px}
-.graph-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px}
-.graph-legend-item{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text2)}
-.graph-legend-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
-
-/* ══════════════════════════════════════════════════════
-   HOW PAGE
-══════════════════════════════════════════════════════ */
-.how-section{margin-bottom:22px}
-.how-num{font-size:9px;color:var(--text3);letter-spacing:.14em;margin-bottom:4px}
-.how-h{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;
-       color:var(--orange);letter-spacing:.1em;margin-bottom:8px;
-       text-shadow:0 0 10px #e67e2255}
-.how-p{color:var(--text2);line-height:1.85;font-size:12px}
-.how-p b{color:var(--cyan)}
-.how-sep{border:none;border-top:1px solid var(--border);margin:18px 0}
-
-/* ══════════════════════════════════════════════════════
-   LOADING SPINNER
-══════════════════════════════════════════════════════ */
-.spinner{display:flex;align-items:center;justify-content:center;
-         height:200px;color:var(--text3);font-size:12px;letter-spacing:.1em;
-         animation:blink 1.2s infinite}
-@keyframes blink{0%,100%{opacity:.3}50%{opacity:1}}
+/* ══ HOW ══ */
+.how-section{margin-bottom:20px}
+.how-num{font-size:9px;color:#ffffffbb;letter-spacing:.14em;margin-bottom:3px}
+.how-h{font-size:14px;color:#ff5e00;letter-spacing:.1em;margin-bottom:7px;
+       text-shadow:0 0 10px #ff5e0055}
+.how-p{color:#ffffff;line-height:1.85;font-size:12px}
+.how-p b{color:#ff5e00}
+.how-sep{border:none;border-top:1px solid var(--border);margin:16px 0}
+.spinner{display:flex;align-items:center;justify-content:center;height:180px;
+         color:#ffffffaa;font-size:11px;letter-spacing:.1em;animation:blink 1.2s infinite}
+@keyframes blink{0%,100%{opacity:.2}50%{opacity:1}}
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- ═══════════ SIDEBAR ═══════════ -->
-  <div id="sidebar">
-    <div id="logo-wrap">
-      <img src="data:image/png;base64,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" alt="ITDer"/>
-    </div>
-    <div class="nav-btn active" data-page="anomaly">
-      <span class="icon">👤</span>
-      <span class="lbl">Scores</span>
-    </div>
-    <div class="nav-btn" data-page="threats">
-      <span class="icon">📈</span>
-      <span class="lbl">Threats</span>
-    </div>
-    <div class="nav-btn" data-page="graph">
-      <span class="icon">🕸️</span>
-      <span class="lbl">Graph</span>
-    </div>
-    <div class="nav-btn" data-page="how">
-      <span class="icon">❓</span>
-      <span class="lbl">About</span>
-    </div>
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <div id="logo-wrap">
+    <img src="data:image/png;base64,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" alt="ITDer"/>
   </div>
 
-  <!-- ═══════════ MAIN ═══════════ -->
-  <div id="main">
+  <!-- Scores icon: person with X -->
+  <div class="nav-btn active" data-page="anomaly">
+    <svg viewBox="0 0 24 24">
+      <circle cx="10" cy="8" r="4"/>
+      <path d="M2 20c0-4 3.6-7 8-7"/>
+      <line x1="16" y1="13" x2="20" y2="17"/>
+      <line x1="20" y1="13" x2="16" y2="17"/>
+    </svg>
+    <span class="lbl">Scores</span>
+  </div>
 
-    <!-- Topbar -->
-    <div id="topbar">
-      <div>
-        <div id="topbar-title">ITDER</div>
-        <div id="topbar-sub">AI-POWERED INSIDER THREAT DETECTION</div>
+  <!-- Threats icon: chart line -->
+  <div class="nav-btn" data-page="threats">
+    <svg viewBox="0 0 24 24">
+      <polyline points="3,18 9,12 13,16 21,8"/>
+      <polyline points="17,8 21,8 21,12"/>
+    </svg>
+    <span class="lbl">Threats</span>
+  </div>
+
+  <!-- About icon: terminal + sparkle (matching the original screenshot 3rd icon) -->
+  <div class="nav-btn" data-page="how">
+    <svg viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="16" rx="3"/>
+      <polyline points="7,9 10,12 7,15"/>
+      <line x1="13" y1="15" x2="17" y2="15"/>
+    </svg>
+    <span class="lbl">About</span>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="topbar">
+    <div>
+      <div id="topbar-title">ITDER</div>
+      <div id="topbar-sub">AI-POWERED INSIDER THREAT DETECTION</div>
+    </div>
+    <div class="topbar-sep"></div>
+    <div class="status-dot"></div>
+    <div id="clock"></div>
+  </div>
+
+  <div id="content">
+
+    <!-- PAGE: ANOMALY -->
+    <div class="page active" id="page-anomaly">
+      <div class="panel">
+        <div class="panel-hdr"><div class="panel-title">User Anomaly Score</div></div>
+        <div class="model-bar">
+          <div class="model-btn active" data-model="isolation_forest">Isolation Forest</div>
+          <div class="model-btn" data-model="oneclass_svm">One-Class SVM</div>
+          <div class="model-btn" data-model="autoencoder">Autoencoder</div>
+        </div>
+        <div id="anomaly-table-wrap"><div class="spinner">LOADING DATA...</div></div>
       </div>
-      <div class="topbar-sep"></div>
-      <div class="status-dot"></div>
-      <div id="clock"></div>
     </div>
 
-    <!-- Content -->
-    <div id="content">
-
-      <!-- ══ PAGE: ANOMALY ══ -->
-      <div class="page active" id="page-anomaly">
-        <div class="panel">
-          <div class="panel-hdr">
-            <div class="panel-title">User Anomaly Score</div>
-          </div>
-          <div class="model-bar" id="model-bar">
-            <div class="model-btn active" data-model="isolation_forest">Isolation Forest</div>
-            <div class="model-btn" data-model="oneclass_svm">One-Class SVM</div>
-            <div class="model-btn" data-model="autoencoder">Autoencoder</div>
-          </div>
-          <div id="anomaly-table-wrap">
-            <div class="spinner">LOADING DATA...</div>
-          </div>
+    <!-- PAGE: THREATS -->
+    <div class="page" id="page-threats">
+      <div class="stats-row">
+        <div class="stat-card blue">
+          <div class="stat-label">Monitored Users</div>
+          <div class="stat-val" id="stat-users">—</div>
+          <div class="stat-sub">active sessions</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label">Red Team</div>
+          <div class="stat-val" id="stat-red">—</div>
+          <div class="stat-sub">confirmed threats</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="stat-label">High Risk</div>
+          <div class="stat-val" id="stat-high">—</div>
+          <div class="stat-sub">top 20% anomaly</div>
         </div>
       </div>
-
-      <!-- ══ PAGE: THREATS ══ -->
-      <div class="page" id="page-threats">
-        <div class="stats-row" id="stats-row">
-          <div class="stat-card blue">
-            <div class="stat-label">Monitored Users</div>
-            <div class="stat-val" id="stat-users">—</div>
-            <div class="stat-sub">active sessions</div>
-          </div>
-          <div class="stat-card red">
-            <div class="stat-label">Red Team</div>
-            <div class="stat-val" id="stat-red">—</div>
-            <div class="stat-sub">confirmed threats</div>
-          </div>
-          <div class="stat-card orange">
-            <div class="stat-label">High Risk</div>
-            <div class="stat-val" id="stat-high">—</div>
-            <div class="stat-sub">top 20% anomaly</div>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="col col-2">
-            <div class="panel">
-              <div class="panel-hdr">
-                <div class="panel-title">Threat Line Chart</div>
-                <div class="panel-badge">(+4) MORE IN 2025</div>
-              </div>
-              <div class="chart-wrap">
-                <canvas id="lineChart" height="220"></canvas>
-              </div>
+      <div class="row">
+        <div class="col2">
+          <div class="panel" style="margin-bottom:0">
+            <div class="panel-hdr">
+              <div class="panel-title">Threat Line Chart</div>
+              <div class="panel-badge">(+4) MORE IN 2025</div>
             </div>
-          </div>
-          <div class="col">
-            <div class="panel" style="height:calc(100% - 18px)">
-              <div class="panel-hdr">
-                <div class="panel-title">Most Common Threats</div>
-              </div>
-              <div class="chart-wrap" style="max-width:220px;margin:0 auto">
-                <canvas id="pieChart" height="220"></canvas>
-              </div>
-              <div class="pie-legend" id="pie-legend"></div>
+            <div class="chart-wrap" style="height:240px">
+              <canvas id="lineChart"></canvas>
             </div>
           </div>
         </div>
-
-        <div class="panel">
-          <div class="panel-hdr">
-            <div class="panel-title">Threat Logs Summary</div>
-          </div>
-          <div id="threat-logs-wrap">
-            <div class="spinner">LOADING...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ PAGE: GRAPH ══ -->
-      <div class="page" id="page-graph">
-        <div class="panel">
-          <div class="panel-hdr">
-            <div class="panel-title">At-Risk Nodes &amp; Connections</div>
-          </div>
-          <div id="graph-container"></div>
-          <div class="graph-legend">
-            <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#e74c3c;box-shadow:0 0 6px #e74c3c"></div>Red Team User</div>
-            <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#e67e22;box-shadow:0 0 6px #e67e22"></div>High Anomaly</div>
-            <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#f1c40f;box-shadow:0 0 6px #f1c40f"></div>Medium Anomaly</div>
-            <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#3ad4f8;box-shadow:0 0 6px #3ad4f8"></div>Low Anomaly</div>
-            <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#27ae60"></div>File Node</div>
-            <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#8e44ad"></div>USB Device</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ PAGE: HOW ══ -->
-      <div class="page" id="page-how">
-        <div class="panel">
-          <div class="panel-hdr"><div class="panel-title">How Does It Work?</div></div>
-
-          <div class="how-section">
-            <div class="how-num">01 / PIPELINE</div>
-            <div class="how-h">Data Simulation &amp; Feature Engineering</div>
-            <div class="how-p">Synthetic logs are generated for user logins, file access, USB usage, and emails,
-              mimicking real organisational activity. Features extracted include login/logout patterns,
-              per-day activity rates, out-of-session file access, graph centrality metrics, and NLP
-              features from email subjects (keyword flags, sentiment, length).</div>
-          </div>
-          <hr class="how-sep"/>
-
-          <div class="how-section">
-            <div class="how-num">02 / MODELS</div>
-            <div class="how-h">Anomaly Detection Algorithms</div>
-            <div class="how-p">
-              <b>Isolation Forest</b> — randomly partitions data; anomalies are isolated faster (shorter average path length in trees).<br><br>
-              <b>One-Class SVM</b> — finds a boundary in feature space enclosing normal data; points outside are flagged as anomalies via RBF kernel methods.<br><br>
-              <b>Autoencoder (MLP)</b> — learns to compress and reconstruct normal behaviour; high reconstruction error indicates an anomaly.
+        <div class="col">
+          <div class="panel" style="margin-bottom:0;height:100%">
+            <div class="panel-hdr"><div class="panel-title">Most Common Threats</div></div>
+            <div class="chart-wrap" style="height:160px">
+              <canvas id="pieChart"></canvas>
             </div>
-          </div>
-          <hr class="how-sep"/>
-
-          <div class="how-section">
-            <div class="how-num">03 / GRAPH</div>
-            <div class="how-h">Graph Analysis</div>
-            <div class="how-p">Users, files, and devices are represented as nodes; access and usage events form edges.
-              <b>Degree centrality</b> measures activity level; <b>betweenness centrality</b> identifies potential
-              information brokers. The at-risk subgraph focuses on high-risk users and their direct connections.</div>
-          </div>
-          <hr class="how-sep"/>
-
-          <div class="how-section">
-            <div class="how-num">04 / XAI</div>
-            <div class="how-h">Explainability</div>
-            <div class="how-p">
-              <b>SHAP</b> — based on cooperative game theory; attributes model predictions to each feature by averaging over all possible feature orderings.<br><br>
-              <b>LIME</b> — perturbs input data locally and fits a simple interpretable model to approximate complex model behaviour.
-            </div>
-          </div>
-          <hr class="how-sep"/>
-
-          <div class="how-section">
-            <div class="how-num">05 / SIMULATION</div>
-            <div class="how-h">Red Team Simulation</div>
-            <div class="how-p">Injects malicious behaviours — after-hours access, mass file downloads, suspicious USB
-              usage — into the dataset to test and benchmark the detection pipeline's sensitivity and precision.</div>
+            <div class="pie-legend" id="pie-legend"></div>
           </div>
         </div>
       </div>
+      <div style="height:18px"></div>
+      <div class="panel">
+        <div class="panel-hdr"><div class="panel-title">Threat Logs Summary</div></div>
+        <div id="threat-logs-wrap"><div class="spinner">LOADING...</div></div>
+      </div>
+    </div>
 
-    </div><!-- /content -->
-  </div><!-- /main -->
+    <!-- PAGE: HOW -->
+    <div class="page" id="page-how">
+      <div class="panel">
+        <div class="panel-hdr"><div class="panel-title">How Does It Work?</div></div>
+        <div class="how-section">
+          <div class="how-num">01 / PIPELINE</div>
+          <div class="how-h">Data Simulation &amp; Feature Engineering</div>
+          <div class="how-p">Synthetic logs for logins, file access, USB, and emails. Features include
+            login/logout patterns, per-day activity rates, out-of-session file access, graph centrality,
+            and NLP features from email subjects.</div>
+        </div>
+        <hr class="how-sep"/>
+        <div class="how-section">
+          <div class="how-num">02 / MODELS</div>
+          <div class="how-h">Anomaly Detection Algorithms</div>
+          <div class="how-p">
+            <b>Isolation Forest</b> — anomalies isolated faster via shorter path lengths.<br><br>
+            <b>One-Class SVM</b> — kernel boundary around normal data; outliers flagged.<br><br>
+            <b>Autoencoder</b> — high reconstruction error = anomalous behaviour.
+          </div>
+        </div>
+        <hr class="how-sep"/>
+        <div class="how-section">
+          <div class="how-num">03 / GRAPH</div>
+          <div class="how-h">Graph Analysis</div>
+          <div class="how-p">Users, files, and devices as nodes. Degree and betweenness centrality
+            expose information brokers and lateral movement.</div>
+        </div>
+        <hr class="how-sep"/>
+        <div class="how-section">
+          <div class="how-num">04 / XAI</div>
+          <div class="how-h">Explainability</div>
+          <div class="how-p">
+            <b>SHAP</b> — game-theory attribution per feature.<br><br>
+            <b>LIME</b> — local perturbation approximates complex decisions.
+          </div>
+        </div>
+        <hr class="how-sep"/>
+        <div class="how-section">
+          <div class="how-num">05 / RED TEAM</div>
+          <div class="how-h">Red Team Simulation</div>
+          <div class="how-p">Injects after-hours access, mass downloads, suspicious USB usage
+            to benchmark detection pipeline sensitivity and precision.</div>
+        </div>
+
+        <hr class="how-sep"/>
+        <div class="how-section">
+          <div class="how-num">06 / INDICATORS</div>
+          <div class="how-h">What Does "RED" Mean in the Table?</div>
+          <div class="how-p">
+            The <b style="color:#e74c3c;background:#200808;border:1px solid #e74c3c44;border-radius:3px;padding:1px 6px;font-size:10px">RED</b>
+            badge displayed next to a username means that user is a confirmed <b>Red Team member</b> — 
+            a simulated insider threat injected into the dataset to benchmark the detection system.<br><br>
+            Red Team users intentionally perform malicious behaviours such as:<br><br>
+            &nbsp;&nbsp;• Accessing files outside of normal working hours<br>
+            &nbsp;&nbsp;• Mass downloading of sensitive documents<br>
+            &nbsp;&nbsp;• Unusual or excessive USB device usage<br>
+            &nbsp;&nbsp;• Sending emails with suspicious keywords<br><br>
+            These users should always appear at or near the <b>top of the anomaly ranking</b>.
+            If they do not, it indicates the model needs retraining or feature tuning.
+            The RED badge is ground-truth data — in a real deployment this would represent
+            a confirmed threat actor identified through investigation.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
 </div><!-- /app -->
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-/* ════════════════════════════════════════════════
-   CLOCK
-════════════════════════════════════════════════ */
-function updateClock(){
+/* Clock */
+function tick(){
   const n=new Date();
-  document.getElementById('clock').textContent=
-    n.toLocaleTimeString('en-GB',{hour12:false})+' UTC';
+  document.getElementById("clock").textContent=
+    n.toLocaleTimeString("en-GB",{hour12:false})+" UTC";
 }
-setInterval(updateClock,1000);updateClock();
+setInterval(tick,1000);tick();
 
-/* ════════════════════════════════════════════════
-   NAV
-════════════════════════════════════════════════ */
-const navBtns=document.querySelectorAll('.nav-btn');
-const pages  =document.querySelectorAll('.page');
-let graphLoaded=false,chartsLoaded=false;
-
+/* Nav */
+const navBtns=document.querySelectorAll(".nav-btn");
+const pages=document.querySelectorAll(".page");
+let chartsLoaded=false;
 navBtns.forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    navBtns.forEach(b=>b.classList.remove('active'));
-    pages.forEach(p=>p.classList.remove('active'));
-    btn.classList.add('active');
-    const id='page-'+btn.dataset.page;
-    document.getElementById(id).classList.add('active');
-    if(btn.dataset.page==='threats' && !chartsLoaded){loadThreats();chartsLoaded=true}
-    if(btn.dataset.page==='graph'   && !graphLoaded ){loadGraph();  graphLoaded=true}
+  btn.addEventListener("click",()=>{
+    navBtns.forEach(b=>b.classList.remove("active"));
+    pages.forEach(p=>p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("page-"+btn.dataset.page).classList.add("active");
+    if(btn.dataset.page==="threats"&&!chartsLoaded){loadThreats();chartsLoaded=true}
   });
 });
 
-/* ════════════════════════════════════════════════
-   RISK HELPERS
-════════════════════════════════════════════════ */
-function riskClass(v){return v>0.5?'risk-hi':v>0.35?'risk-md':'risk-lo'}
+function rc(v){return v>0.5?"risk-hi":v>0.35?"risk-md":"risk-lo"}
 
-/* ════════════════════════════════════════════════
-   PAGE 1 – ANOMALY TABLE
-════════════════════════════════════════════════ */
+/* PAGE 1 – Anomaly */
 let anomalyData=[];
-let currentModel='isolation_forest';
-
+let curModel="isolation_forest";
 async function loadAnomaly(){
-  const res=await fetch('/api/anomaly');
+  const res=await fetch("/api/anomaly");
   anomalyData=await res.json();
-  renderAnomalyTable();
+  renderAnomaly();
 }
-
-function renderAnomalyTable(){
-  const rows=anomalyData.filter(r=>r.model===currentModel);
-  let html=`<table class="tbl">
-  <thead><tr>
-    <th>Username</th><th>Model Score</th><th>Rank</th>
-    <th>Risk Score</th><th>Reasoning</th><th>Certainty</th><th>Detection Time</th>
+function renderAnomaly(){
+  const rows=anomalyData.filter(r=>r.model===curModel);
+  let h=`<table class="tbl"><thead><tr>
+    <th>username</th><th>isolation forest</th><th>rank</th>
+    <th>risk score</th><th>reasoning</th><th>certainty</th><th>detection time</th>
   </tr></thead><tbody>`;
   rows.forEach(r=>{
-    const rc=riskClass(r.score);
-    const flag=r.is_red?'<span class="red-flag">RED TEAM</span> ':'';
-    html+=`<tr>
+    const flag=r.is_red?`<span class="red-flag">RED</span>`:"";
+    h+=`<tr>
       <td>${flag}<span class="user-link">${r.user}</span></td>
       <td style="color:var(--text2)">${r.score.toFixed(4)}</td>
       <td style="color:var(--text3)">${r.rank}</td>
-      <td class="${rc}">${r.risk.toFixed(2)}</td>
+      <td class="${rc(r.score)}">${r.risk.toFixed(2)}</td>
       <td>${r.reasoning}</td>
       <td style="color:var(--text2)">${r.certainty.toFixed(2)}</td>
       <td style="color:var(--text3)">${r.time}</td>
     </tr>`;
   });
-  html+=`</tbody></table>`;
-  document.getElementById('anomaly-table-wrap').innerHTML=html;
+  h+=`</tbody></table>`;
+  document.getElementById("anomaly-table-wrap").innerHTML=h;
 }
-
-// Model selector
-document.querySelectorAll('.model-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('.model-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    currentModel=btn.dataset.model;
-    renderAnomalyTable();
+document.querySelectorAll(".model-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    document.querySelectorAll(".model-btn").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    curModel=btn.dataset.model;
+    renderAnomaly();
   });
 });
-
 loadAnomaly();
 
-/* ════════════════════════════════════════════════
-   PAGE 2 – THREATS
-════════════════════════════════════════════════ */
+/* PAGE 2 – Threats */
 async function loadThreats(){
-  const res=await fetch('/api/stats');
+  const res=await fetch("/api/stats");
   const d=await res.json();
+  document.getElementById("stat-users").textContent=d.total_users;
+  document.getElementById("stat-red").textContent=d.red_team;
+  document.getElementById("stat-high").textContent=d.high_risk;
 
-  document.getElementById('stat-users').textContent=d.total_users;
-  document.getElementById('stat-red').textContent=d.red_team;
-  document.getElementById('stat-high').textContent=d.high_risk;
-
-  // Line chart
-  const lineCtx=document.getElementById('lineChart').getContext('2d');
-  const grad=lineCtx.createLinearGradient(0,0,0,220);
-  grad.addColorStop(0,'rgba(231,76,60,0.45)');
-  grad.addColorStop(1,'rgba(231,76,60,0.02)');
-  new Chart(lineCtx,{
-    type:'line',
-    data:{
-      labels:d.threat_labels,
-      datasets:[{
-        data:d.threat_months,
-        borderColor:'#e74c3c',borderWidth:2.5,
-        backgroundColor:grad,fill:true,
-        pointBackgroundColor:'#e74c3c',
-        pointBorderColor:'#07090f',
-        pointRadius:4,pointHoverRadius:6,
-        tension:0.45,
-      }]
-    },
+  const lCtx=document.getElementById("lineChart").getContext("2d");
+  const grad=lCtx.createLinearGradient(0,0,0,240);
+  grad.addColorStop(0,"rgba(231,76,60,0.42)");
+  grad.addColorStop(1,"rgba(231,76,60,0.02)");
+  new Chart(lCtx,{
+    type:"line",
+    data:{labels:d.threat_labels,datasets:[{
+      data:d.threat_months,borderColor:"#e74c3c",borderWidth:2.5,
+      backgroundColor:grad,fill:true,
+      pointBackgroundColor:"#e74c3c",pointBorderColor:"#0a0e17",
+      pointRadius:4,pointHoverRadius:6,tension:0.42,
+    }]},
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{
-        backgroundColor:'#0b0f1a',borderColor:'#142030',borderWidth:1,
-        titleColor:'#3ad4f8',bodyColor:'#8ab4c4',
-        titleFont:{family:'Share Tech Mono',size:11},
-        bodyFont:{family:'Share Tech Mono',size:11},
+        backgroundColor:"#0d1320",borderColor:"#1a3040",borderWidth:1,
+        titleColor:"#3ad4f8",bodyColor:"#9abccc",
+        titleFont:{family:"Share Tech Mono",size:11},
+        bodyFont:{family:"Share Tech Mono",size:11},
       }},
       scales:{
-        x:{grid:{color:'#0b1e2c',lineWidth:.8},
-           ticks:{color:'#2a5060',font:{family:'Share Tech Mono',size:10}}},
-        y:{grid:{color:'#0b1e2c',lineWidth:.8},
-           ticks:{color:'#2a5060',font:{family:'Share Tech Mono',size:10}},
-           min:0,max:28},
+        x:{grid:{color:"#0b1e2c",lineWidth:.7},ticks:{color:"#2e5060",font:{family:"Share Tech Mono",size:10}}},
+        y:{grid:{color:"#0b1e2c",lineWidth:.7},ticks:{color:"#2e5060",font:{family:"Share Tech Mono",size:10}},min:0,max:28},
       }
     }
   });
 
-  // Pie chart
-  const COLORS=['#e67e22','#c0392b','#f1c40f'];
-  const pieCtx=document.getElementById('pieChart').getContext('2d');
-  new Chart(pieCtx,{
-    type:'doughnut',
-    data:{
-      labels:d.threat_types.map(t=>t.name),
-      datasets:[{
-        data:d.threat_types.map(t=>t.pct),
-        backgroundColor:COLORS,
-        borderColor:'#07090f',borderWidth:3,
-        hoverOffset:8,
-      }]
-    },
+  const COLS=["#e67e22","#c0392b","#f1c40f"];
+  const pCtx=document.getElementById("pieChart").getContext("2d");
+  new Chart(pCtx,{
+    type:"doughnut",
+    data:{labels:d.threat_types.map(t=>t.name),datasets:[{
+      data:d.threat_types.map(t=>t.pct),
+      backgroundColor:COLS,borderColor:"#0a0e17",borderWidth:3,hoverOffset:6,
+    }]},
     options:{
-      responsive:true,maintainAspectRatio:false,cutout:'42%',
-      plugins:{
-        legend:{display:false},
-        tooltip:{
-          backgroundColor:'#0b0f1a',borderColor:'#142030',borderWidth:1,
-          titleColor:'#3ad4f8',bodyColor:'#8ab4c4',
-          titleFont:{family:'Share Tech Mono',size:11},
-          bodyFont:{family:'Share Tech Mono',size:11},
-        }
-      }
+      responsive:true,maintainAspectRatio:false,cutout:"44%",
+      plugins:{legend:{display:false},tooltip:{
+        backgroundColor:"#0d1320",borderColor:"#1a3040",borderWidth:1,
+        titleColor:"#3ad4f8",bodyColor:"#9abccc",
+        titleFont:{family:"Share Tech Mono",size:11},
+        bodyFont:{family:"Share Tech Mono",size:11},
+      }}
     }
   });
 
-  // Pie legend
-  const leg=document.getElementById('pie-legend');
+  const leg=document.getElementById("pie-legend");
   d.threat_types.forEach((t,i)=>{
     leg.innerHTML+=`<div class="pie-legend-item">
-      <div class="pie-dot" style="background:${COLORS[i]};box-shadow:0 0 6px ${COLORS[i]}"></div>
-      <span>${t.name} — <b style="color:${COLORS[i]}">${t.pct}%</b></span>
+      <div class="pie-dot" style="background:${COLS[i]};box-shadow:0 0 5px ${COLS[i]}55"></div>
+      <span>${t.name} — <b style="color:${COLS[i]}">${t.pct}%</b></span>
     </div>`;
   });
 
-  // Logs table
-  let tbl=`<table class="tbl">
-  <thead><tr>
-    <th>User</th><th>Iso Forest</th><th>Rank</th>
-    <th>Risk</th><th>Reasoning</th><th>Certainty</th><th>Time</th>
+  let h=`<table class="tbl"><thead><tr>
+    <th>user</th><th>iso forest</th><th>rank</th>
+    <th>risk</th><th>reasoning</th><th>certainty</th><th>time</th>
   </tr></thead><tbody>`;
   d.top_threats.forEach(r=>{
-    const rc=riskClass(r.iso);
-    tbl+=`<tr>
+    h+=`<tr>
       <td><span class="user-link">${r.user}</span></td>
       <td style="color:var(--text2)">${r.iso.toFixed(4)}</td>
       <td style="color:var(--text3)">${r.rank}</td>
-      <td class="${rc}">${r.risk.toFixed(2)}</td>
+      <td class="${rc(r.iso)}">${r.risk.toFixed(2)}</td>
       <td>${r.reasoning}</td>
       <td style="color:var(--text2)">${r.certainty.toFixed(2)}</td>
       <td style="color:var(--text3)">${r.time}</td>
     </tr>`;
   });
-  tbl+=`</tbody></table>`;
-  document.getElementById('threat-logs-wrap').innerHTML=tbl;
-}
-
-/* ════════════════════════════════════════════════
-   PAGE 3 – GRAPH (vis-network)
-════════════════════════════════════════════════ */
-async function loadGraph(){
-  const container=document.getElementById('graph-container');
-  container.innerHTML='<div class="spinner">BUILDING GRAPH...</div>';
-  const res=await fetch('/api/graph');
-  const d=await res.json();
-
-  const nodes=new vis.DataSet(d.nodes.map(n=>({
-    id:n.id, label:n.label,
-    color:{background:n.color,border:n.color,
-           highlight:{background:n.color,border:'#fff'},
-           hover:{background:n.color,border:'#fff'}},
-    size:n.size,
-    font:{color:'#8ab4c4',size:10,face:'Share Tech Mono'},
-    borderWidth:1.5,
-    shadow:{enabled:true,color:n.color,size:10,x:0,y:0},
-  })));
-  const edges=new vis.DataSet(d.edges.map(e=>({
-    from:e.from,to:e.to,
-    color:{color:e.color,highlight:'#ffffff44',hover:'#ffffff55'},
-    width:1,smooth:{type:'continuous'},
-  })));
-
-  container.innerHTML='';
-  new vis.Network(container,{nodes,edges},{
-    physics:{
-      enabled:true,
-      stabilization:{iterations:200,fit:true},
-      barnesHut:{gravitationalConstant:-3000,centralGravity:0.15,
-                 springLength:180,springConstant:0.008,damping:0.9,avoidOverlap:0.8},
-    },
-    interaction:{hover:true,tooltipDelay:100},
-    nodes:{shape:'dot'},
-    edges:{arrows:{},smooth:{enabled:true,type:'continuous',roundness:0.3}},
-  });
+  h+=`</tbody></table>`;
+  document.getElementById("threat-logs-wrap").innerHTML=h;
 }
 </script>
 </body>
