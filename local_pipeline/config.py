@@ -4,7 +4,7 @@
 # ============================================================
 
 # How many days back to pull events (applies to all collectors)
-DAYS_BACK = 15
+DAYS_BACK = 40
 
 # Output file produced by pipeline.py
 from pathlib import Path

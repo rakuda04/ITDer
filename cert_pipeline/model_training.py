@@ -48,19 +48,19 @@ warnings.filterwarnings('ignore')
 # =============================================================================
 
 SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
-BASE_PROJECT_PATH = os.path.dirname(SCRIPT_DIR)
+BASE_PROJECT_PATH = SCRIPT_DIR  # cert_pipeline/ is the project root
 
 CONFIG = {
     'base_path'        : BASE_PROJECT_PATH,
-    'input_file'       : 'model_intake_final.csv',
+    'input_file'       : os.path.join('output', 'model_intake_final.csv'),
     'labels_file'      : os.path.join('dataset', 'answers', 'insiders.csv'),
     'cert_version'     : '4.2',           
     # Outputs
     
-    'output_daily'     : 'anomaly_report_daily.csv',
-    'output_users'     : 'anomaly_report_users.csv',
-    'output_thresholds': 'cert_thresholds.json',
-    'model_dir'        : 'saved_models',  # saved here for local deployment
+    'output_daily'     : os.path.join('output', 'anomaly_report_daily.csv'),
+    'output_users'     : os.path.join('output', 'anomaly_report_users.csv'),
+    'output_thresholds': os.path.join('output', 'cert_thresholds.json'),
+    'model_dir'        : os.path.join('output', 'models'),  
 
     # Set True when running on local data with no labels
     'deploy_mode'      : False,
@@ -635,7 +635,7 @@ def main():
     # Save
     daily_path = os.path.join(CONFIG['base_path'], CONFIG['output_daily'])
     user_path  = os.path.join(CONFIG['base_path'], CONFIG['output_users'])
-    shap_path  = os.path.join(CONFIG['base_path'], 'shap_values.csv')
+    shap_path  = os.path.join(CONFIG['base_path'], 'output', 'shap_values.csv')
 
     df.to_csv(daily_path, index=False)
     user_report.to_csv(user_path)
