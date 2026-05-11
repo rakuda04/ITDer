@@ -5,8 +5,7 @@ from datetime import timedelta
 
 # --- 1. DYNAMIC PATH CALCULATION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_PROJECT_PATH = os.path.dirname(SCRIPT_DIR)
-
+BASE_PROJECT_PATH = SCRIPT_DIR  
 
 
 class FeatureEngineer:
@@ -217,7 +216,7 @@ class FeatureEngineer:
 if __name__ == "__main__":
     CONFIG = {
         'base_path': BASE_PROJECT_PATH,
-        'output_file': 'model_intake_final.csv',
+        'output_file': os.path.join('output', 'model_intake_final.csv'),
         'apply_date_shift': True,
         'shift_days': -1,           # Sun-Thu regional calendar correction
         'weekend_days': [4, 5],     # 4=Fri, 5=Sat in 0-indexed post-shift days
