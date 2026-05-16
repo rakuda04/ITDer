@@ -542,9 +542,10 @@ def build_user_report(df, feature_cols):
 
 def export_thresholds(combined, supervised_scores, iso_scores, lof_scores, df):
     """
-    Saves CERT score percentiles for use as deployment thresholds.
-    Prevents contamination rate from forcing a fixed % of flags on clean
-    local populations that may look very different from CERT.
+    Saves CERT score percentiles and raw score ranges for use as deployment
+    thresholds. The min/max ranges for IsoForest and LOF are saved so that
+    inference.py can normalize local scores against the same CERT scale,
+    preventing local min/max compression from inflating everyone's score.
     """
     thresholds = {
         'combined_risk_p99'    : float(np.percentile(combined,          99)),
@@ -555,6 +556,12 @@ def export_thresholds(combined, supervised_scores, iso_scores, lof_scores, df):
         'iso_score_p98'        : float(np.percentile(iso_scores,         2)),
         'iso_score_p95'        : float(np.percentile(iso_scores,         5)),
         'lof_score_p98'        : float(np.percentile(lof_scores,         2)),
+        # CERT score ranges — used by inference.py to normalize local scores
+        # on the same scale as training, preventing population size compression.
+        'iso_score_min'        : float(iso_scores.min()),
+        'iso_score_max'        : float(iso_scores.max()),
+        'lof_score_min'        : float(lof_scores.min()),
+        'lof_score_max'        : float(lof_scores.max()),
         'contamination_used'   : CONFIG['contamination'],
         'training_rows'        : int(len(df)),
         'training_users'       : int(df['user'].nunique()),
