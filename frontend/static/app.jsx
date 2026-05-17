@@ -2,11 +2,11 @@ const { useState, useEffect, useRef } = React;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const pct        = (v) => (Number(v) * 100).toFixed(1) + "%";
-const riskTier   = (s) => s >= 0.85 ? "critical" : s >= 0.70 ? "high" : "medium";
-const scoreColor = (v) => v >= 0.85 ? "#dc2626" : v >= 0.70 ? "#d97706" : "#059669";
-const scoreGrad  = (v) => v >= 0.85
+const riskTier   = (s) => s >= 0.75 ? "critical" : s >= 0.40 ? "high" : "medium";
+const scoreColor = (v) => v >= 0.75 ? "#dc2626" : v >= 0.40 ? "#d97706" : "#059669";
+const scoreGrad  = (v) => v >= 0.75
   ? "linear-gradient(90deg,#dc2626,#ef4444)"
-  : v >= 0.70
+  : v >= 0.40
   ? "linear-gradient(90deg,#d97706,#f59e0b)"
   : "linear-gradient(90deg,#059669,#10b981)";
 
@@ -210,13 +210,11 @@ function App() {
   const { data: dailyAll,  loading: dL, error: dE } = useApi("/api/daily");
   const { data: shapAll,   loading: sL, error: sE } = useApi("/api/shap");
 
-  const [sel, setSel] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [sel, setSel]   = useState(null);
+  const [tab, setTab]   = useState("overview");
   const [dark, setDark] = useState(getInitialDark);
 
-  // apply theme on mount and on change
   useEffect(() => { applyTheme(dark); }, [dark]);
-
   const toggleTheme = () => setDark((d) => !d);
 
   useEffect(() => {
@@ -228,7 +226,7 @@ function App() {
   const user     = usersData.find((u) => u.user === sel);
   const daily    = dailyAll.filter((d) => d.user === sel);
   const shap     = shapAll.filter((d) => d.user === sel);
-  const tier     = user ? riskTier(user.final_risk_score) : "medium";
+  const tier     = user ? riskTier(user.composite_rank_score ?? user.final_risk_score) : "medium";
   const T        = dark ? TIER_DARK[tier] : TIER[tier];
   const flagged  = daily.filter((d) => d.above_threshold).length;
   const breaches = daily.filter((d) => d.above_threshold).map((d) => d.date.slice(5)).slice(-3);
@@ -275,7 +273,7 @@ function App() {
           >
             {usersData.map((u) => (
               <option key={u.user} value={u.user}>
-                #{u.rank} {u.user} · {(u.final_risk_score * 100).toFixed(1)}%
+                #{u.rank} {u.user} · {((u.composite_rank_score ?? u.final_risk_score) * 100).toFixed(1)}%
               </option>
             ))}
           </select>
@@ -285,16 +283,16 @@ function App() {
       {/* stat cards */}
       {user && (
         <div className="stats">
-          <StatCard label="Final risk"       value={pct(user.final_risk_score)}  cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="r" />
-          <StatCard label="Supervised max"   value={pct(user.supervised_max)}    cls="a" accent="a" />
-          <StatCard label="Unsupervised max" value={pct(user.unsupervised_max)}  cls="m" accent="b" />
-          <StatCard label="Days breached"    value={flagged}                     cls={flagged > 2 ? "r" : "g"} accent="r" />
-          <StatCard label="ISO anomalies"    value={user.days_flagged_iso}       cls={user.days_flagged_iso > 5 ? "r" : "m"} accent="b" />
-          <StatCard label="LOF anomalies"    value={user.days_flagged_lof}       cls={user.days_flagged_lof > 5 ? "r" : "m"} accent="b" />
+          <StatCard label="Composite score"  value={pct(user.composite_rank_score ?? user.final_risk_score)} cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="r" />
+          <StatCard label="Mean risk score"  value={pct(user.final_risk_score)}   cls="a" accent="a" />
+          <StatCard label="Supervised mean"  value={pct(user.supervised_mean)}    cls="a" accent="a" />
+          <StatCard label="Days breached"    value={flagged}                      cls={flagged > 2 ? "r" : "g"} accent="r" />
+          <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : "m"} accent="b" />
+          <StatCard label="LOF anomalies"    value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : "m"} accent="b" />
         </div>
       )}
 
-      {/* identity bar */}
+      {/* identity bar — no blinking dot */}
       {user && (
         <div className="ibar">
           <div className="av" style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text }}>
@@ -304,10 +302,7 @@ function App() {
             <div className="iname">{user.user}</div>
             <div className="imeta">rank #{user.rank} · {user.is_synthetic ? "synthetic" : "real user"} · peak {user.peak_date}</div>
           </div>
-          <div className="tbadge" style={{ background: T.bg, color: T.text, borderColor: T.border }}>
-            <span className="tdot" style={{ background: T.dot }} />
-            {T.label}
-          </div>
+
         </div>
       )}
 
@@ -335,10 +330,13 @@ function App() {
                   <span className="lbrnk">{u.rank}</span>
                   <span className="lbnm">{u.user}</span>
                   <div className="lbtrack">
-                    <div className="lbfill" style={{ width: (u.final_risk_score * 100) + "%", background: scoreGrad(u.final_risk_score) }} />
+                    <div className="lbfill" style={{ width: ((u.composite_rank_score ?? u.final_risk_score) * 100) + "%", background: scoreGrad(u.composite_rank_score ?? u.final_risk_score) }} />
                   </div>
-                  <span className="lbsc" style={{ color: scoreColor(u.final_risk_score) }}>
-                    {(u.final_risk_score * 100).toFixed(0)}%
+                  <span className="lbdays" style={{ color: u.days_above_threshold > 0 ? scoreColor(u.composite_rank_score ?? u.final_risk_score) : "var(--text-4)" }}>
+                    {u.days_above_threshold > 0 ? `${u.days_above_threshold}d` : "—"}
+                  </span>
+                  <span className="lbsc" style={{ color: scoreColor(u.composite_rank_score ?? u.final_risk_score) }}>
+                    {((u.composite_rank_score ?? u.final_risk_score) * 100).toFixed(0)}%
                   </span>
                 </div>
               ))}
@@ -347,16 +345,17 @@ function App() {
 
           <div className="panel">
             <div className="ptitle">Score breakdown — {user.user}</div>
-            <ScoreBar label="Final risk score"  value={user.final_risk_score} />
-            <ScoreBar label="Supervised max"    value={user.supervised_max} />
-            <ScoreBar label="Supervised mean"   value={user.supervised_mean} />
-            <ScoreBar label="Unsupervised max"  value={user.unsupervised_max} />
+            <ScoreBar label="Composite rank score" value={user.composite_rank_score ?? user.final_risk_score} />
+            <ScoreBar label="Mean risk score"      value={user.final_risk_score} />
+            <ScoreBar label="Supervised mean"      value={user.supervised_mean} />
+            <ScoreBar label="Unsupervised max"     value={user.unsupervised_max} />
             <div className="ptitle" style={{ marginTop: 20 }}>Anomaly detection</div>
             <div className="anogrid">
               {[
-                ["ISO flagged",  user.days_flagged_iso,  "var(--accent)"],
-                ["LOF flagged",  user.days_flagged_lof,  "var(--green)"],
-                ["Both flagged", user.days_flagged_both, "var(--red)"],
+                ["Days flagged", user.days_above_threshold, "var(--red)"],
+                ["ISO flagged",  user.days_flagged_iso,     "var(--accent)"],
+                ["LOF flagged",  user.days_flagged_lof,     "var(--green)"],
+                ["Both flagged", user.days_flagged_both,    "var(--red)"],
               ].map(([lbl, val, col]) => (
                 <div className="anocell" key={lbl}>
                   <div className="anonum" style={{ color: col }}>{val}</div>
@@ -468,7 +467,5 @@ function App() {
   );
 }
 
-// apply theme before first render to avoid flash
 applyTheme(getInitialDark());
-
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

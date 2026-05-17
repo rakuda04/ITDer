@@ -483,3 +483,28 @@ body {
   background: var(--border);
   border-color: var(--text-4);
 }
+/* ── leaderboard section headers ─────────────────────────────── */
+.lb-section-title {
+  font-size: 10px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  font-weight: 600;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+}
+
+/* ── leaderboard days column ─────────────────────────────────── */
+.lbdays {
+  font-size: 10px;
+  font-family: monospace;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+/* ── anomaly grid — 4 columns when days_flagged added ────────── */
+.anogrid { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 500px) { .anogrid { grid-template-columns: repeat(2, 1fr); } }

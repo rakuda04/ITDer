@@ -22,19 +22,19 @@
 #   RANDOM_SCENARIOS — True: randomly assign scenarios to insiders
 #                      False: one insider per scenario (always 3)
 #
-# Note on z-score anchoring:
-#   logon_count_zscore and usb_count_zscore use CERT population
-#   stats from cert_baseline_stats.json when typical_user_std > 0.
-#   When typical_user_std = 0 (e.g. logon_count, where most CERT
-#   users log on exactly once per day so within-user std = 0),
-#   the z-score is sampled directly from the CERT z-score
-#   distribution instead. This preserves realistic day-to-day
-#   variation while keeping scores anchored to the CERT scale.
+# Note on normal day constraints:
+#   Several features are capped for normal users to prevent the RF
+#   from flagging them as suspicious due to random sampling noise:
 #
-# Note on job_site_visits_flag for normal users:
-#   Forced to 0 for normal days. The CERT normal distribution has a
-#   high mean because many CERT employees browsed job sites, which
-#   inflates RF scores since it's the second most important feature.
+#   after_hours_session_count: capped at 1. Normal users occasionally
+#     work late but should not regularly log in at midnight or 5am.
+#     The CERT distribution goes up to 4, which inflates RF scores.
+#
+#   logon/usb z-scores: clipped to [-1.5, 1.5]. Prevents random
+#     extreme values from spiking RF scores on individual days.
+#
+#   job_site_visits_flag: forced to 0. Normal users in the synthetic
+#     population represent low-risk baseline behavior.
 # ============================================================
 
 import sys
@@ -47,25 +47,25 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # ── paths ────────────────────────────────────────────────────
-SCRIPT_DIR        = Path(__file__).resolve().parent
-CERT_INTAKE       = SCRIPT_DIR.parent / "cert_pipeline" / "output" / "model_intake_final.csv"
-CERT_BASELINE     = SCRIPT_DIR.parent / "cert_pipeline" / "output" / "cert_baseline_stats.json"
-OUTPUT_PATH       = SCRIPT_DIR / "output" / "synthetic_population.csv"
+SCRIPT_DIR    = Path(__file__).resolve().parent
+CERT_INTAKE   = SCRIPT_DIR.parent / "cert_pipeline" / "output" / "model_intake_final.csv"
+CERT_BASELINE = SCRIPT_DIR.parent / "cert_pipeline" / "output" / "cert_baseline_stats.json"
+OUTPUT_PATH   = SCRIPT_DIR / "output" / "synthetic_population.csv"
 
 # ── toggles ──────────────────────────────────────────────────
-PHASED           = True    # True = normal phase → active phase; False = always anomalous
-RANDOM_SCENARIOS = True    # True = random scenario per insider; False = one per scenario
+PHASED           = True
+RANDOM_SCENARIOS = True
 
 # ── config ───────────────────────────────────────────────────
-N_NORMAL_USERS    = 27     # synthetic normal users
-N_INSIDER_USERS   = 3      # synthetic insider users
-N_DAYS            = 90     # days per synthetic user
-NORMAL_PHASE_DAYS = 20     # days of clean behavior before going rogue (PHASED=True only)
+N_NORMAL_USERS    = 27
+N_INSIDER_USERS   = 3
+N_DAYS            = 90
+NORMAL_PHASE_DAYS = 20
 RANDOM_SEED       = 42
 
 SCENARIOS = [1, 2, 3]
 
-# ── feature columns (must match schema) ──────────────────────
+# ── feature columns ──────────────────────────────────────────
 FEATURE_COLS = [
     'after_hours_session_count',
     'weekend_session_flag',
@@ -84,13 +84,11 @@ FEATURE_COLS = [
 # ── helpers ──────────────────────────────────────────────────
 
 def _load_cert_distributions(path: Path) -> dict:
-    """Extract per-feature mean and std from CERT intake CSV."""
     print(f"[synthetic] Loading CERT distributions from {path}...")
     if not path.exists():
         raise FileNotFoundError(f"CRITICAL: {path} not found. Run cert_preprocessor.py first.")
 
     df = pd.read_csv(path)
-
     if 'insider_label' in df.columns:
         df = df[df['insider_label'] == 0]
 
@@ -111,10 +109,6 @@ def _load_cert_distributions(path: Path) -> dict:
 
 
 def _load_baseline_stats(path: Path) -> dict:
-    """
-    Load population-level baseline stats saved by cert_preprocessor.py.
-    Falls back to None if file not found.
-    """
     if not path.exists():
         print(f"[synthetic] WARNING: {path} not found.")
         print(f"  → Re-run cert_preprocessor.py to generate cert_baseline_stats.json.")
@@ -130,29 +124,16 @@ def _load_baseline_stats(path: Path) -> dict:
 
 
 def _anchored_zscore(rng, baseline_stats, feat_name, dist_stats,
-                     clip_min=-3.0, clip_max=3.0):
-    """
-    Generate a z-score anchored to the CERT population distribution.
-
-    If typical_user_std > 0: generate a raw count, compute z-score
-    relative to population mean — mirrors what CERT preprocessor does.
-
-    If typical_user_std = 0 (e.g. logon_count where most users log on
-    exactly once per day): fall back to sampling directly from the CERT
-    z-score distribution. This preserves realistic variation while
-    keeping scores on the CERT scale.
-    """
+                     clip_min=-1.5, clip_max=1.5):
     s        = baseline_stats[feat_name]
     pop_mean = s['population_mean']
     pop_std  = s['population_std']
     user_std = s['typical_user_std']
 
     if user_std > 0:
-        # Compute z-score from a generated raw count
         raw_count = max(0, rng.normal(pop_mean, pop_std))
         zscore    = (raw_count - pop_mean) / user_std
     else:
-        # Fall back: sample z-score directly from CERT z-score distribution
         zscore = rng.normal(dist_stats['mean'], max(dist_stats['std'], 0.01))
 
     return float(np.clip(zscore, clip_min, clip_max))
@@ -160,12 +141,6 @@ def _anchored_zscore(rng, baseline_stats, feat_name, dist_stats,
 
 def _generate_normal_day(stats: dict, rng: np.random.RandomState,
                           baseline_stats: dict = None) -> dict:
-    """
-    Generate one day of normal behavior sampled from CERT distributions.
-
-    logon_count_zscore and usb_count_zscore use CERT population anchoring.
-    job_site_visits_flag and job_search_plus_usb_week are forced to 0.
-    """
     row = {}
     for col in FEATURE_COLS:
         s   = stats[col]
@@ -185,15 +160,23 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
 
         row[col] = val
 
-    # Anchor z-scores to CERT population if baseline stats are available
+    # Cap after-hours logins at 1 for normal users — values above 1
+    # mean the user is regularly logging in at midnight or 5am, which
+    # the RF reads as suspicious. Normal users occasionally work late
+    # but not multiple after-hours sessions per day.
+    row['after_hours_session_count'] = min(row['after_hours_session_count'], 1)
+
+    # Anchor z-scores with tight normal-day clipping [-1.5, 1.5]
     if baseline_stats is not None:
         if 'logon_count' in baseline_stats:
-            row['logon_count_zscore']              = _anchored_zscore(
-                rng, baseline_stats, 'logon_count', stats['logon_count_zscore'])
+            row['logon_count_zscore'] = _anchored_zscore(
+                rng, baseline_stats, 'logon_count',
+                stats['logon_count_zscore'], clip_min=-1.5, clip_max=1.5)
             row['logon_count_zscore_has_baseline'] = 1
         if 'usb_count' in baseline_stats:
-            row['usb_count_zscore']              = _anchored_zscore(
-                rng, baseline_stats, 'usb_count', stats['usb_count_zscore'])
+            row['usb_count_zscore'] = _anchored_zscore(
+                rng, baseline_stats, 'usb_count',
+                stats['usb_count_zscore'], clip_min=-1.5, clip_max=1.5)
             row['usb_count_zscore_has_baseline'] = 1
 
     # Normal users do not job search
@@ -206,10 +189,6 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
 def _generate_insider_day(stats: dict, scenario: int,
                            rng: np.random.RandomState,
                            baseline_stats: dict = None) -> dict:
-    """
-    Generate one anomalous day for a given insider scenario.
-    Starts from a normal day and applies scenario-specific overrides.
-    """
     row = _generate_normal_day(stats, rng, baseline_stats)
 
     if scenario == 1:
