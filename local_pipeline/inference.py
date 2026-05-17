@@ -8,7 +8,7 @@
 # Stages:
 #   Stage 1 — RF supervised (CERT-trained weights, no retraining)
 #   Stage 2 — IsoForest (scored against combined population)
-#   Stage 3 — LOF (scored against combined population)
+#   Stage 3 — Elliptic Envelope (fitted on local population)
 #   Stage 4 — Combined risk score + SHAP explanations
 #
 # Note on normalization:
@@ -43,7 +43,6 @@ import numpy as np
 import pandas as pd
 import shap
 from pathlib import Path
-from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings('ignore')
@@ -66,7 +65,6 @@ OUTPUT_SHAP      = OUTPUT_DIR / "local_shap_values.csv"
 CONFIG = {
     'weight_supervised':        0.7,
     'weight_unsupervised':      0.3,
-    'lof_neighbors':            20,
     'shap_days_per_user':       3,
     # Composite ranking weights — must sum to 1.0
     'rank_weight_mean_score':   0.7,
@@ -87,7 +85,7 @@ def _load_models():
     for name, fname in [
         ('rf',        'rf_supervised.pkl'),
         ('iso',       'iso_forest.pkl'),
-        ('lof_scaler','lof_scaler.pkl'),
+        ('elliptic',  'elliptic_env.pkl'),
     ]:
         path = MODEL_DIR / fname
         if not path.exists():
@@ -179,18 +177,15 @@ def _run_iso(X, models, feature_cols):
     return preds, scores
 
 
-def _run_lof(X, models):
-    print("[infer] Stage 3: LOF scoring...")
-    scaler   = models['lof_scaler']
+def _run_elliptic(X, models):
+    print("[infer] Stage 3: Elliptic Envelope scoring...")
+    # Load CERT-trained EE — judging local data against CERT normal baseline
+    saved  = models['elliptic']
+    ee     = saved['model']
+    scaler = saved['scaler']
     X_scaled = scaler.transform(X.values)
-    lof      = LocalOutlierFactor(
-        n_neighbors   = CONFIG['lof_neighbors'],
-        contamination = 'auto',
-        novelty       = False,
-        n_jobs        = -1,
-    )
-    preds  = lof.fit_predict(X_scaled)
-    scores = lof.negative_outlier_factor_
+    preds  = ee.predict(X_scaled)
+    scores = ee.score_samples(X_scaled)
     print(f"  → Flagged {(preds == -1).sum()} rows")
     return preds, scores
 
@@ -207,14 +202,9 @@ def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds, th
         iso_max = float(iso_scores.max())
         print(f"  → WARNING: Using local iso range (re-run model_training.py for CERT anchoring)")
 
-    if 'lof_score_min' in thresholds and 'lof_score_max' in thresholds:
-        lof_min = thresholds['lof_score_min']
-        lof_max = thresholds['lof_score_max']
-        print(f"  → Using CERT lof range: [{lof_min:.4f}, {lof_max:.4f}]")
-    else:
-        lof_min = float(lof_scores.min())
-        lof_max = float(lof_scores.max())
-        print(f"  → WARNING: Using local lof range (re-run model_training.py for CERT anchoring)")
+    # EE uses local normalization — no CERT anchoring needed since EE is always fitted locally
+    lof_min = float(lof_scores.min())
+    lof_max = float(lof_scores.max())
 
     iso_norm = 1 - (iso_scores - iso_min) / (iso_max - iso_min + 1e-9)
     iso_norm = np.clip(iso_norm, 0, 1)
@@ -307,8 +297,8 @@ def run():
     # Stage 2 — IsoForest
     iso_preds, iso_scores = _run_iso(X_aligned, models, aligned_cols)
 
-    # Stage 3 — LOF
-    lof_preds, lof_scores = _run_lof(X_aligned, models)
+    # Stage 3 — Elliptic Envelope
+    lof_preds, lof_scores = _run_elliptic(X_aligned, models)
 
     # Stage 4 — Combined
     combined, unsupervised, iso_norm, lof_norm = _build_combined(

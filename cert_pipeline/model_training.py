@@ -8,7 +8,7 @@ Three-stage insider threat detection pipeline:
     Evaluated with stratified k-fold cross-validation for honest metrics.
     Saved to disk for local deployment without retraining.
 
-  Stage 2 — Unsupervised (IsolationForest + LOF ensemble)
+  Stage 2 — Unsupervised (IsolationForest + Elliptic Envelope ensemble)
     No labels used. Catches behavioral deviations from population norms.
     Acts as a safety net for novel insider behavior that doesn't match
     known CERT patterns.
@@ -34,6 +34,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import shap
+from sklearn.covariance import EllipticEnvelope
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import (precision_score, recall_score, roc_auc_score)
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
@@ -80,7 +81,7 @@ CONFIG = {
     # Supervised settings
     'cv_folds'         : 5,       # stratified k-fold
     'rf_n_estimators'  : 300,
-    'rf_max_depth'     : 8,       # shallow = better generalization to local data
+    'rf_max_depth'     : 5,       # shallower = better generalization to local data
 
     # Combined score weights (must sum to 1.0)
     'weight_supervised'  : 0.7,
@@ -208,7 +209,7 @@ def run_supervised(X, df, feature_cols):
     rf = RandomForestClassifier(
         n_estimators     = CONFIG['rf_n_estimators'],
         max_depth        = CONFIG['rf_max_depth'],
-        min_samples_leaf = 10,
+        min_samples_leaf = 50,  # higher = less overfitting to noisy insider signals
         random_state     = 42,
         n_jobs           = -1,
         class_weight     = 'balanced',
@@ -347,31 +348,48 @@ def run_isolation_forest(X):
     return model, preds, scores
 
 
-def run_lof(X):
-    """Distance-based local density outlier detection. SCALED."""
-    print(f"\nTraining LOF (n_neighbors={CONFIG['lof_neighbors']})...")
+def run_elliptic(X, X_normal):
+    """
+    Elliptic Envelope trained on CERT normal rows only.
+    Learns the statistical boundary of normal behavior from 1,000 users
+    over 18 months. At inference time, applied without refitting so the
+    local population is judged against the same CERT normal baseline.
+    Complements IsoForest: ISO finds global outliers, EE finds statistical
+    deviations from normal behavior.
+    """
+    print(f"\nTraining Elliptic Envelope on normal rows only ({len(X_normal):,} rows)...")
     scaler   = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    model    = LocalOutlierFactor(n_neighbors=CONFIG['lof_neighbors'],
-                                  contamination=CONFIG['contamination'],
-                                  novelty=False, n_jobs=-1)
-    preds  = model.fit_predict(X_scaled)
-    scores = model.negative_outlier_factor_
+    X_normal_scaled = scaler.fit_transform(X_normal)
+    X_scaled = scaler.transform(X)
+
+    model = EllipticEnvelope(
+        contamination    = CONFIG['contamination'],
+        random_state     = 42,
+        support_fraction = 0.9,
+    )
+    model.fit(X_normal_scaled)
+    preds  = model.predict(X_scaled)
+    scores = model.score_samples(X_scaled)
     print(f"  Flagged {(preds==-1).sum():,} rows ({(preds==-1).mean()*100:.2f}%)")
 
     model_dir = os.path.join(CONFIG['base_path'], CONFIG['model_dir'])
-    with open(os.path.join(model_dir, 'lof_scaler.pkl'), 'wb') as f:
-        pickle.dump(scaler, f)
+    os.makedirs(model_dir, exist_ok=True)
+    with open(os.path.join(model_dir, 'elliptic_env.pkl'), 'wb') as f:
+        pickle.dump({'model': model, 'scaler': scaler}, f)
+    print(f"  Saved to: {os.path.join(model_dir, 'elliptic_env.pkl')}")
 
     return preds, scores
 
 
-def run_unsupervised(X):
+def run_unsupervised(X, df):
     print("\n" + "="*60)
-    print("  STAGE 2: UNSUPERVISED — ISOFOREST + LOF")
+    print("  STAGE 2: UNSUPERVISED — ISOFOREST + ELLIPTIC ENVELOPE")
     print("="*60)
     iso_model, iso_preds, iso_scores = run_isolation_forest(X)
-    lof_preds, lof_scores            = run_lof(X)
+    # Train EE on normal rows only so it learns what normal looks like
+    normal_mask = df["insider_label"] == 0
+    X_normal    = X[normal_mask.values]
+    lof_preds, lof_scores = run_elliptic(X, X_normal)
     return iso_model, iso_preds, iso_scores, lof_preds, lof_scores
 
 
@@ -607,7 +625,7 @@ def main():
         supervised_scores = rf_model.predict_proba(X)[:, 1]
 
     # Stage 2: Unsupervised
-    iso_model, iso_preds, iso_scores, lof_preds, lof_scores = run_unsupervised(X)
+    iso_model, iso_preds, iso_scores, lof_preds, lof_scores = run_unsupervised(X, df)
 
     # Stage 3: Combined
     combined, unsupervised, iso_norm, lof_norm = build_combined_score(

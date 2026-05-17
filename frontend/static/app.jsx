@@ -118,14 +118,14 @@ function TimelineChart({ daily, sel, dark }) {
             pointBorderWidth: rows.map((d) => d.above_threshold ? 5 : 0),
           },
           {
-            label: "Supervised",
-            data: rows.map((d) => +(d.supervised_score * 100).toFixed(1)),
+            label: "IsoForest",
+            data: rows.map((d) => +(d.iso_score_norm * 100).toFixed(1)),
             borderColor: "#6366f1", borderDash: [6, 3], tension: 0.35,
             fill: false, borderWidth: 1.5, pointRadius: 0,
           },
           {
-            label: "Unsupervised",
-            data: rows.map((d) => +(d.unsupervised_score * 100).toFixed(1)),
+            label: "Elliptic Env",
+            data: rows.map((d) => +(d.lof_score_norm * 100).toFixed(1)),
             borderColor: "#059669", borderDash: [2, 4], tension: 0.35,
             fill: false, borderWidth: 1.5, pointRadius: 0,
           },
@@ -207,6 +207,115 @@ function ShapChart({ shap, dark }) {
   return <canvas ref={ref} aria-label="SHAP feature attribution" />;
 }
 
+
+// ── settings panel ────────────────────────────────────────────────────────────
+function SettingsPanel({ onClose, onDone, dark }) {
+  const [synthCfg, setSynthCfg] = React.useState({
+    n_normal_users: 27, n_insider_users: 3, n_days: 90,
+    normal_phase_days: 20, phased: true, random_scenarios: true,
+  });
+  const [inferCfg, setInferCfg] = React.useState({
+    rank_weight_mean_score: 0.5, rank_weight_flagged_days: 0.5,
+  });
+  const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
+  const [log, setLog]         = React.useState(null); // {ok, text}
+
+  const run = async (endpoint, cfg) => {
+    setRunning(endpoint);
+    setLog(null);
+    try {
+      const r = await fetch(`/api/run/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      const d = await r.json();
+      setLog({ ok: d.ok, text: d.ok ? '✓ Done' : (d.output || 'Error') });
+      if (d.ok) onDone();
+    } catch(e) {
+      setLog({ ok: false, text: String(e) });
+    }
+    setRunning(null);
+  };
+
+  const updateWeight = (val) => {
+    const v = Math.min(1, Math.max(0, parseFloat(val) || 0));
+    setInferCfg({ rank_weight_mean_score: v, rank_weight_flagged_days: +(1 - v).toFixed(2) });
+  };
+
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-panel" onClick={e => e.stopPropagation()}>
+        <div className="settings-hdr">
+          <span className="settings-title">Pipeline settings</span>
+          <button className="settings-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-title">Synthetic population</div>
+          <div className="settings-row">
+            <label>Normal users</label>
+            <input type="number" min="1" max="100" value={synthCfg.n_normal_users}
+              onChange={e => setSynthCfg(p => ({...p, n_normal_users: +e.target.value}))} />
+          </div>
+          <div className="settings-row">
+            <label>Insider users</label>
+            <input type="number" min="1" max="20" value={synthCfg.n_insider_users}
+              onChange={e => setSynthCfg(p => ({...p, n_insider_users: +e.target.value}))} />
+          </div>
+          <div className="settings-row">
+            <label>Days per user</label>
+            <input type="number" min="10" max="365" value={synthCfg.n_days}
+              onChange={e => setSynthCfg(p => ({...p, n_days: +e.target.value}))} />
+          </div>
+          <div className="settings-row">
+            <label>Normal phase days</label>
+            <input type="number" min="1" max={synthCfg.n_days - 1} value={synthCfg.normal_phase_days}
+              onChange={e => setSynthCfg(p => ({...p, normal_phase_days: +e.target.value}))} />
+          </div>
+          <div className="settings-row">
+            <label>Phased behavior</label>
+            <input type="checkbox" checked={synthCfg.phased}
+              onChange={e => setSynthCfg(p => ({...p, phased: e.target.checked}))} />
+          </div>
+          <div className="settings-row">
+            <label>Random scenarios</label>
+            <input type="checkbox" checked={synthCfg.random_scenarios}
+              onChange={e => setSynthCfg(p => ({...p, random_scenarios: e.target.checked}))} />
+          </div>
+          <button className="settings-run" disabled={running === 'synthetic'}
+            onClick={() => run('synthetic', synthCfg)}>
+            {running === 'synthetic' ? 'Running…' : 'Run synthetic generator'}
+          </button>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-title">Inference ranking</div>
+          <div className="settings-row">
+            <label>Mean score weight</label>
+            <input type="number" min="0" max="1" step="0.05"
+              value={inferCfg.rank_weight_mean_score}
+              onChange={e => updateWeight(e.target.value)} />
+          </div>
+          <div className="settings-row">
+            <label>Flagged days weight</label>
+            <span className="settings-derived">{inferCfg.rank_weight_flagged_days.toFixed(2)}</span>
+          </div>
+          <div className="settings-note">Weights must sum to 1.0 — flagged days adjusts automatically.</div>
+          <button className="settings-run" disabled={running === 'inference'}
+            onClick={() => run('inference', inferCfg)}>
+            {running === 'inference' ? 'Running…' : 'Run inference'}
+          </button>
+        </div>
+
+        {log && (
+          <div className={`settings-log ${log.ok ? 'ok' : 'err'}`}>{log.text}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── main app ──────────────────────────────────────────────────────────────────
 function App() {
   const { data: usersData, loading: uL, error: uE } = useApi("/api/users");
@@ -216,8 +325,13 @@ function App() {
   const [sel, setSel]   = useState(null);
   const [tab, setTab]   = useState("overview");
   const [dark, setDark] = useState(getInitialDark);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => { applyTheme(dark); }, [dark]);
+  const reloadData = () => {
+    // Force re-fetch by reloading the page
+    window.location.reload();
+  };
   const toggleTheme = () => setDark((d) => !d);
 
   useEffect(() => {
@@ -269,6 +383,7 @@ function App() {
         </div>
         <div className="hdr-right">
           <ThemeToggle dark={dark} onToggle={toggleTheme} />
+          <button className="settings-btn" onClick={() => setShowSettings(true)} title="Pipeline settings">⚙</button>
           <select
             className="usr-sel"
             value={sel || ""}
@@ -291,7 +406,7 @@ function App() {
           <StatCard label="Supervised mean"  value={pct(user.supervised_mean)}    cls="a" accent="a" />
           <StatCard label="Days breached"    value={flagged}                      cls={flagged > 2 ? "r" : "g"} accent="r" />
           <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : "m"} accent="b" />
-          <StatCard label="LOF anomalies"    value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : "m"} accent="b" />
+          <StatCard label="EE anomalies"     value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : "m"} accent="b" />
         </div>
       )}
 
@@ -356,7 +471,7 @@ function App() {
               {[
                 ["Days flagged", user.days_above_threshold, "var(--red)"],
                 ["ISO flagged",  user.days_flagged_iso,     "var(--accent)"],
-                ["LOF flagged",  user.days_flagged_lof,     "var(--green)"],
+                ["EE flagged",   user.days_flagged_lof,     "var(--green)"],
                 ["Both flagged", user.days_flagged_both,    "var(--red)"],
               ].map(([lbl, val, col]) => (
                 <div className="anocell" key={lbl}>
@@ -375,7 +490,7 @@ function App() {
           <div className="panel-hdr">
             <div className="ptitle" style={{ margin: 0 }}>Daily risk score — {sel}</div>
             <div className="legend">
-              {[["Combined","#dc2626","solid"],["Supervised","#6366f1","dashed"],["Unsupervised","#059669","dotted"]].map(([lbl, col, sty]) => (
+              {[["Combined","#dc2626","solid"],["IsoForest","#6366f1","dashed"],["Elliptic Env","#059669","dotted"]].map(([lbl, col, sty]) => (
                 <span key={lbl} className="legitem">
                   <span className="legline" style={sty === "solid" ? { background: col } : { background: "none", border: `1.5px ${sty} ${col}` }} />
                   {lbl}
@@ -465,6 +580,13 @@ function App() {
         </div>
       )}
 
+      {showSettings && (
+        <SettingsPanel
+          onClose={() => setShowSettings(false)}
+          onDone={() => { setShowSettings(false); reloadData(); }}
+          dark={dark}
+        />
+      )}
     </div>
   );
 }
