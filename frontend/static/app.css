@@ -508,3 +508,11 @@ body {
 /* ── anomaly grid — 4 columns when days_flagged added ────────── */
 .anogrid { grid-template-columns: repeat(4, 1fr); }
 @media (max-width: 500px) { .anogrid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── score bar subtitle ──────────────────────────────────────── */
+.ssub {
+  font-size: 10px;
+  color: var(--text-4);
+  margin-top: 1px;
+  font-weight: 400;
+}

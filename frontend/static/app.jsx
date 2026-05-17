@@ -59,11 +59,14 @@ function StatCard({ label, value, cls, accent }) {
   );
 }
 
-function ScoreBar({ label, value }) {
+function ScoreBar({ label, sub, value }) {
   return (
     <div className="srow">
       <div className="smeta">
-        <span className="slb2">{label}</span>
+        <div>
+          <span className="slb2">{label}</span>
+          {sub && <div className="ssub">{sub}</div>}
+        </div>
         <span className="snum">{pct(value)}</span>
       </div>
       <div className="strk">
@@ -284,7 +287,7 @@ function App() {
       {user && (
         <div className="stats">
           <StatCard label="Composite score"  value={pct(user.composite_rank_score ?? user.final_risk_score)} cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="r" />
-          <StatCard label="Mean risk score"  value={pct(user.final_risk_score)}   cls="a" accent="a" />
+          <StatCard label="Unsupervised mean"  value={pct(user.unsupervised_mean ?? user.unsupervised_max)} cls="a" accent="a" />
           <StatCard label="Supervised mean"  value={pct(user.supervised_mean)}    cls="a" accent="a" />
           <StatCard label="Days breached"    value={flagged}                      cls={flagged > 2 ? "r" : "g"} accent="r" />
           <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : "m"} accent="b" />
@@ -345,10 +348,9 @@ function App() {
 
           <div className="panel">
             <div className="ptitle">Score breakdown — {user.user}</div>
-            <ScoreBar label="Composite rank score" value={user.composite_rank_score ?? user.final_risk_score} />
-            <ScoreBar label="Mean risk score"      value={user.final_risk_score} />
-            <ScoreBar label="Supervised mean"      value={user.supervised_mean} />
-            <ScoreBar label="Unsupervised max"     value={user.unsupervised_max} />
+            <ScoreBar label="Composite rank score" sub="Final verdict — weighted rank across all users"         value={user.composite_rank_score ?? user.final_risk_score} />
+            <ScoreBar label="Daily avg score"      sub="Average combined model score across all days"           value={user.final_risk_score} />
+            <ScoreBar label="Anomaly signal"       sub="Avg unsupervised score — how unusual vs the population" value={user.unsupervised_mean ?? user.unsupervised_max} />
             <div className="ptitle" style={{ marginTop: 20 }}>Anomaly detection</div>
             <div className="anogrid">
               {[

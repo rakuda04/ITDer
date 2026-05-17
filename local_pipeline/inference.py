@@ -253,6 +253,7 @@ def _build_user_report(df, threshold):
         supervised_max       =('supervised_score',    'max'),
         supervised_mean      =('supervised_score',    'mean'),
         unsupervised_max     =('unsupervised_score',  'max'),
+        unsupervised_mean    =('unsupervised_score',  'mean'),
         days_flagged_iso     =('iso_prediction',      lambda x: (x == -1).sum()),
         days_flagged_lof     =('lof_prediction',      lambda x: (x == -1).sum()),
         days_flagged_both    =('flagged_by_both',     'sum'),
