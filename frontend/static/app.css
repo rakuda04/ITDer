@@ -690,3 +690,52 @@ body {
   padding: 0 6px; height: 32px;
   display: flex; align-items: center; justify-content: center;
 }
+
+/* ── tabs spacer (pushes Info to far right) ──────────────────── */
+.tabs-spacer { flex: 1; }
+
+/* ── info tab ────────────────────────────────────────────────── */
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.info-panel { display: flex; flex-direction: column; gap: 0; }
+
+/* scenario cards */
+.scenario-card {
+  border-radius: 10px; padding: 16px 18px;
+  margin-bottom: 12px;
+  border-left: 4px solid transparent;
+}
+.sc-1 { background: rgba(220,38,38,0.10);   border-color: #ef4444; }
+.sc-2 { background: rgba(217,119,6,0.10);   border-color: #f59e0b; }
+.sc-3 { background: rgba(99,102,241,0.10);  border-color: #818cf8; }
+
+.sc-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.sc-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; padding: 3px 9px; border-radius: 4px;
+  background: rgba(255,255,255,0.12); color: var(--text-2);
+  flex-shrink: 0;
+}
+.sc-name {
+  font-size: 14px; font-weight: 700; color: var(--text);
+}
+.sc-signals {
+  font-size: 12px; color: var(--text-3); font-weight: 600;
+  margin-bottom: 8px; letter-spacing: .01em;
+}
+.sc-desc {
+  font-size: 13px; color: var(--text-2); line-height: 1.7;
+}
+.sc-note {
+  font-size: 12px; color: var(--text-3); line-height: 1.65;
+  padding: 12px 14px; border-radius: 8px;
+  background: var(--bg-subtle); margin-top: 4px;
+  border: 1px solid var(--border-soft);
+}

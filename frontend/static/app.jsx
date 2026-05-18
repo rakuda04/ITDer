@@ -21,7 +21,7 @@ const TIER_DARK = {
   medium:   { label: "Medium",   dot: "#34d399", text: "#34d399", bg: "#021c12", border: "#064e3b" },
 };
 
-const TABS = [["overview","Overview"],["timeline","Timeline"],["flags","Flags"],["shap","SHAP"]];
+const TABS = [["overview","Overview"],["timeline","Timeline"],["flags","Flags"],["shap","SHAP"],["info","Info"]];
 
 // ── theme ─────────────────────────────────────────────────────────────────────
 function getInitialDark() {
@@ -436,11 +436,15 @@ function App() {
 
       {/* tabs */}
       <div className="tabs">
-        {TABS.map(([id, lbl]) => (
+        {TABS.filter(([id]) => id !== "info").map(([id, lbl]) => (
           <button key={id} className={`tb${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>
             {lbl}
           </button>
         ))}
+        <span className="tabs-spacer" />
+        <button className={`tb${tab === "info" ? " on" : ""}`} onClick={() => setTab("info")}>
+          Info
+        </button>
       </div>
 
       {/* overview */}
@@ -600,6 +604,46 @@ function App() {
             SHAP values show each feature's marginal contribution to the supervised model output.
             Red = pushes score up · indigo = pushes down · showing most recent available date.
           </div>
+        </div>
+      )}
+
+      {/* info tab */}
+      {tab === "info" && user && (
+        <div className="info-grid">
+
+          <div className="panel info-panel">
+            <div className="ptitle">CERT insider scenarios</div>
+
+            <div className="scenario-card sc-1">
+              <div className="sc-header">
+                <span className="sc-badge">Scenario 1</span>
+                <span className="sc-name">The Disgruntled Employee — Sabotage</span>
+              </div>
+              <div className="sc-signals">After-hours logons · USB exfiltration · No prior USB history</div>
+              <div className="sc-desc">Employee plants malware or copies files after hours using USB. Typically no prior USB activity, making the spike highly anomalous. Detected by IsoForest isolating the unusual USB + after-hours combination.</div>
+            </div>
+
+            <div className="scenario-card sc-2">
+              <div className="sc-header">
+                <span className="sc-badge">Scenario 2</span>
+                <span className="sc-name">The Departing Employee — Data Theft</span>
+              </div>
+              <div className="sc-signals">Job site visits · USB spike above baseline · Job search + USB compound signal</div>
+              <div className="sc-desc">Employee preparing to leave begins visiting job sites and copying files to USB. The compound signal (job search week + USB usage) is a strong indicator. Elliptic Env detects the behavioral drift from normal cluster.</div>
+            </div>
+
+            <div className="scenario-card sc-3">
+              <div className="sc-header">
+                <span className="sc-badge">Scenario 3</span>
+                <span className="sc-name">The Disgruntled SysAdmin — Sabotage</span>
+              </div>
+              <div className="sc-signals">After-hours logons · USB usage · Weekend sessions</div>
+              <div className="sc-desc">Privileged user with system access performs after-hours operations including weekend sessions. Similar to Scenario 1 but typically more sustained and with weekend activity. Both IsoForest and Elliptic Env tend to agree on these days.</div>
+            </div>
+
+            <div className="sc-note">Scenarios sourced from CERT Insider Threat Dataset r4.2. Synthetic insiders in this pipeline are assigned one scenario each and exhibit that behavioral pattern during their active threat phase.</div>
+          </div>
+
         </div>
       )}
 
