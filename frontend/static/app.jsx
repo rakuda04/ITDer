@@ -208,6 +208,19 @@ function ShapChart({ shap, dark }) {
 }
 
 
+// ── stepper input ─────────────────────────────────────────────────────────────
+function Stepper({ value, onChange, min, max, step = 1 }) {
+  const dec = () => onChange(Math.max(min ?? -Infinity, value - step));
+  const inc = () => onChange(Math.min(max ??  Infinity, value + step));
+  return (
+    <div className="stepper">
+      <button className="stepper-btn" onClick={dec}>−</button>
+      <span className="stepper-val">{value}</span>
+      <button className="stepper-btn" onClick={inc}>+</button>
+    </div>
+  );
+}
+
 // ── settings panel ────────────────────────────────────────────────────────────
 function SettingsPanel({ onClose, onDone, dark }) {
   const [synthCfg, setSynthCfg] = React.useState({
@@ -215,7 +228,7 @@ function SettingsPanel({ onClose, onDone, dark }) {
     normal_phase_days: 20, phased: true, random_scenarios: true,
   });
   const [inferCfg, setInferCfg] = React.useState({
-    rank_weight_mean_score: 0.5, rank_weight_flagged_days: 0.5,
+    threshold: 0.3793,
   });
   const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
   const [log, setLog]         = React.useState(null); // {ok, text}
@@ -238,10 +251,7 @@ function SettingsPanel({ onClose, onDone, dark }) {
     setRunning(null);
   };
 
-  const updateWeight = (val) => {
-    const v = Math.min(1, Math.max(0, parseFloat(val) || 0));
-    setInferCfg({ rank_weight_mean_score: v, rank_weight_flagged_days: +(1 - v).toFixed(2) });
-  };
+
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -255,23 +265,23 @@ function SettingsPanel({ onClose, onDone, dark }) {
           <div className="settings-section-title">Synthetic population</div>
           <div className="settings-row">
             <label>Normal users</label>
-            <input type="number" min="1" max="100" value={synthCfg.n_normal_users}
-              onChange={e => setSynthCfg(p => ({...p, n_normal_users: +e.target.value}))} />
+            <Stepper value={synthCfg.n_normal_users} min={1} max={100}
+              onChange={v => setSynthCfg(p => ({...p, n_normal_users: v}))} />
           </div>
           <div className="settings-row">
             <label>Insider users</label>
-            <input type="number" min="1" max="20" value={synthCfg.n_insider_users}
-              onChange={e => setSynthCfg(p => ({...p, n_insider_users: +e.target.value}))} />
+            <Stepper value={synthCfg.n_insider_users} min={1} max={20}
+              onChange={v => setSynthCfg(p => ({...p, n_insider_users: v}))} />
           </div>
           <div className="settings-row">
             <label>Days per user</label>
-            <input type="number" min="10" max="365" value={synthCfg.n_days}
-              onChange={e => setSynthCfg(p => ({...p, n_days: +e.target.value}))} />
+            <Stepper value={synthCfg.n_days} min={10} max={365}
+              onChange={v => setSynthCfg(p => ({...p, n_days: v}))} />
           </div>
           <div className="settings-row">
             <label>Normal phase days</label>
-            <input type="number" min="1" max={synthCfg.n_days - 1} value={synthCfg.normal_phase_days}
-              onChange={e => setSynthCfg(p => ({...p, normal_phase_days: +e.target.value}))} />
+            <Stepper value={synthCfg.normal_phase_days} min={1} max={synthCfg.n_days - 1}
+              onChange={v => setSynthCfg(p => ({...p, normal_phase_days: v}))} />
           </div>
           <div className="settings-row">
             <label>Phased behavior</label>
@@ -290,18 +300,13 @@ function SettingsPanel({ onClose, onDone, dark }) {
         </div>
 
         <div className="settings-section">
-          <div className="settings-section-title">Inference ranking</div>
+          <div className="settings-section-title">Inference</div>
           <div className="settings-row">
-            <label>Mean score weight</label>
-            <input type="number" min="0" max="1" step="0.05"
-              value={inferCfg.rank_weight_mean_score}
-              onChange={e => updateWeight(e.target.value)} />
+            <label>Alert threshold</label>
+            <Stepper value={inferCfg.threshold} min={0.1} max={0.99} step={0.01}
+              onChange={v => setInferCfg({ threshold: +v.toFixed(4) })} />
           </div>
-          <div className="settings-row">
-            <label>Flagged days weight</label>
-            <span className="settings-derived">{inferCfg.rank_weight_flagged_days.toFixed(2)}</span>
-          </div>
-          <div className="settings-note">Weights must sum to 1.0 — flagged days adjusts automatically.</div>
+          <div className="settings-note">Unsupervised score above which a day is flagged as anomalous. p99 of synthetic normals = 0.3793.</div>
           <button className="settings-run" disabled={running === 'inference'}
             onClick={() => run('inference', inferCfg)}>
             {running === 'inference' ? 'Running…' : 'Run inference'}
@@ -340,10 +345,13 @@ function App() {
 
   const loading  = uL || dL || sL;
   const error    = uE || dE || sE;
+  const sortedUsers = [...usersData].sort((a, b) =>
+    (b.unsupervised_mean ?? b.unsupervised_max ?? 0) - (a.unsupervised_mean ?? a.unsupervised_max ?? 0)
+  );
   const user     = usersData.find((u) => u.user === sel);
   const daily    = dailyAll.filter((d) => d.user === sel);
   const shap     = shapAll.filter((d) => d.user === sel);
-  const tier     = user ? riskTier(user.composite_rank_score ?? user.final_risk_score) : "medium";
+  const tier     = user ? riskTier(user.unsupervised_mean ?? user.unsupervised_max) : "medium";
   const T        = dark ? TIER_DARK[tier] : TIER[tier];
   const flagged  = daily.filter((d) => d.above_threshold).length;
   const breaches = daily.filter((d) => d.above_threshold).map((d) => d.date.slice(5)).slice(-3);
@@ -382,16 +390,18 @@ function App() {
           </div>
         </div>
         <div className="hdr-right">
-          <ThemeToggle dark={dark} onToggle={toggleTheme} />
-          <button className="settings-btn" onClick={() => setShowSettings(true)} title="Pipeline settings">⚙</button>
+          <div className="hdr-controls">
+            <button className="settings-btn" onClick={() => setShowSettings(true)} title="Pipeline settings">⚙</button>
+            <ThemeToggle dark={dark} onToggle={toggleTheme} />
+          </div>
           <select
             className="usr-sel"
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {usersData.map((u) => (
+            {sortedUsers.map((u, i) => (
               <option key={u.user} value={u.user}>
-                #{u.rank} {u.user} · {((u.composite_rank_score ?? u.final_risk_score) * 100).toFixed(1)}%
+                #{i + 1} {u.user}
               </option>
             ))}
           </select>
@@ -401,12 +411,12 @@ function App() {
       {/* stat cards */}
       {user && (
         <div className="stats">
-          <StatCard label="Composite score"  value={pct(user.composite_rank_score ?? user.final_risk_score)} cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="r" />
-          <StatCard label="Unsupervised mean"  value={pct(user.unsupervised_mean ?? user.unsupervised_max)} cls="a" accent="a" />
-          <StatCard label="Supervised mean"  value={pct(user.supervised_mean)}    cls="a" accent="a" />
-          <StatCard label="Days breached"    value={flagged}                      cls={flagged > 2 ? "r" : "g"} accent="r" />
-          <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : "m"} accent="b" />
-          <StatCard label="EE anomalies"     value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : "m"} accent="b" />
+          <StatCard label="Rank"             value={`#${sortedUsers.findIndex(u => u.user === sel) + 1} of ${usersData.length}`}                  cls={user.rank <= 3 ? "r" : user.rank <= 10 ? "a" : "g"} accent="r" />
+          <StatCard label="Anomaly signal"   value={pct(user.unsupervised_mean ?? user.unsupervised_max)}     cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="a" />
+          <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : user.days_flagged_iso > 0 ? "a" : "g"} accent="b" />
+          <StatCard label="EE anomalies"     value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : user.days_flagged_lof > 0 ? "a" : "g"} accent="b" />
+          <StatCard label="Both flagged"     value={user.days_flagged_both}       cls={user.days_flagged_both > 0 ? "r" : "g"} accent="r" />
+          <StatCard label="Days monitored"   value={user.total_days}              cls="m" accent="b" />
         </div>
       )}
 
@@ -418,7 +428,7 @@ function App() {
           </div>
           <div style={{ flex: 1 }}>
             <div className="iname">{user.user}</div>
-            <div className="imeta">rank #{user.rank} · {user.is_synthetic ? "synthetic" : "real user"} · peak {user.peak_date}</div>
+            <div className="imeta">rank #{sortedUsers.findIndex(u => u.user === sel) + 1} · {user.is_synthetic ? "synthetic" : "real user"} · peak {user.peak_date}</div>
           </div>
 
         </div>
@@ -439,22 +449,22 @@ function App() {
           <div className="panel">
             <div className="ptitle">Risk leaderboard — {usersData.length} users</div>
             <div className="lb-scroll">
-              {usersData.map((u) => (
+              {sortedUsers.map((u, i) => (
                 <div
                   key={u.user}
                   className={`lbrow${u.user === sel ? " sel" : ""}`}
                   onClick={() => setSel(u.user)}
                 >
-                  <span className="lbrnk">{u.rank}</span>
+                  <span className="lbrnk">{i + 1}</span>
                   <span className="lbnm">{u.user}</span>
                   <div className="lbtrack">
-                    <div className="lbfill" style={{ width: ((u.composite_rank_score ?? u.final_risk_score) * 100) + "%", background: scoreGrad(u.composite_rank_score ?? u.final_risk_score) }} />
+                    <div className="lbfill" style={{ width: ((u.unsupervised_mean ?? u.unsupervised_max) * 100) + "%", background: scoreGrad(u.unsupervised_mean ?? u.unsupervised_max) }} />
                   </div>
-                  <span className="lbdays" style={{ color: u.days_above_threshold > 0 ? scoreColor(u.composite_rank_score ?? u.final_risk_score) : "var(--text-4)" }}>
-                    {u.days_above_threshold > 0 ? `${u.days_above_threshold}d` : "—"}
+                  <span className="lbdays" style={{ color: u.days_flagged_both > 0 ? scoreColor(u.unsupervised_mean ?? u.unsupervised_max) : "var(--text-4)" }}>
+                    {u.days_flagged_both > 0 ? `${u.days_flagged_both}d` : "—"}
                   </span>
-                  <span className="lbsc" style={{ color: scoreColor(u.composite_rank_score ?? u.final_risk_score) }}>
-                    {((u.composite_rank_score ?? u.final_risk_score) * 100).toFixed(0)}%
+                  <span className="lbsc" style={{ color: scoreColor(u.unsupervised_mean ?? u.unsupervised_max) }}>
+                    {((u.unsupervised_mean ?? u.unsupervised_max) * 100).toFixed(0)}%
                   </span>
                 </div>
               ))}
@@ -463,9 +473,10 @@ function App() {
 
           <div className="panel">
             <div className="ptitle">Score breakdown — {user.user}</div>
-            <ScoreBar label="Composite rank score" sub="Final verdict — weighted rank across all users"         value={user.composite_rank_score ?? user.final_risk_score} />
-            <ScoreBar label="Daily avg score"      sub="Average combined model score across all days"           value={user.final_risk_score} />
-            <ScoreBar label="Anomaly signal"       sub="Avg unsupervised score — how unusual vs the population" value={user.unsupervised_mean ?? user.unsupervised_max} />
+            <ScoreBar label="Avg anomaly signal"  sub="Mean combined score across all days — matches leaderboard %"   value={user.unsupervised_mean ?? user.unsupervised_max} />
+            <ScoreBar label="IsoForest mean"      sub="Avg IsoForest isolation score — how separated from population"  value={user.iso_score_norm_mean ?? 0} />
+            <ScoreBar label="Elliptic Env mean"   sub="Avg EE score — distance from normal cluster"                    value={user.lof_score_norm_mean ?? 0} />
+
             <div className="ptitle" style={{ marginTop: 20 }}>Anomaly detection</div>
             <div className="anogrid">
               {[
@@ -498,50 +509,62 @@ function App() {
               ))}
               <span className="legitem">
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
-                Breach
+                Threshold breach
               </span>
             </div>
           </div>
           <div style={{ position: "relative", width: "100%", height: 260 }}>
             <TimelineChart daily={daily} sel={sel} dark={dark} />
           </div>
-          {breaches.length > 0 && (
-            <div className="breach">
-              <span style={{ fontSize: 14 }}>⚠</span>
-              <span className="btxt">Recent threshold breaches: {breaches.join(" · ")}</span>
-            </div>
-          )}
         </div>
       )}
 
       {/* flags table */}
       {tab === "flags" && (
         <div className="panel">
-          <div className="ptitle">Behavioral flags — {sel} (most recent 20)</div>
-          <div className="sx">
+          <div className="panel-hdr">
+            <div className="ptitle" style={{ margin: 0 }}>Behavioral flags — {sel}</div>
+            <div className="legend">
+              <span className="legitem"><span className="flag-pill pill-red">ANOM</span> Anomaly detected</span>
+              <span className="legitem"><span className="bdot" style={{ background: "var(--red)" }} /> Above threshold</span>
+            </div>
+          </div>
+          <div className="sx" style={{ marginTop: 14 }}>
             <table className="ftable">
               <thead>
                 <tr>
-                  {["Date","Risk","AH sess","USB","USB A/H","Job site","Weekend","ISO","LOF","⚑"].map((h) => (
-                    <th key={h}>{h}</th>
-                  ))}
+                  <th>Date</th>
+                  <th>Risk score</th>
+                  <th>After-hours sessions</th>
+                  <th>USB devices</th>
+                  <th>USB after-hours</th>
+                  <th>Job site visit</th>
+                  <th>Weekend session</th>
+                  <th>IsoForest</th>
+                  <th>Elliptic Env</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => (
-                  <tr key={row.date} className={row.above_threshold ? "ar" : ""}>
-                    <td style={{ color: "var(--text-3)" }}>{row.date.slice(5)}</td>
-                    <td style={{ color: scoreColor(row.combined_risk_score), fontWeight: 600 }}>{pct(row.combined_risk_score)}</td>
-                    <td>{row.after_hours_session_count}</td>
-                    <td>{row.usb_count}</td>
-                    <td className={row.usb_after_hours_flag ? "fy" : "fok"}>{row.usb_after_hours_flag ? "YES" : "—"}</td>
-                    <td className={row.job_site_visits_flag ? "fw" : "fok"}>{row.job_site_visits_flag ? "YES" : "—"}</td>
-                    <td className={row.weekend_session_flag ? "fw" : "fok"}>{row.weekend_session_flag ? "YES" : "—"}</td>
-                    <td>{row.iso_prediction == -1 ? <span className="fanom">ANOM</span> : <span className="fnorm">ok</span>}</td>
-                    <td>{row.lof_prediction == -1 ? <span className="fanom">ANOM</span> : <span className="fnorm">ok</span>}</td>
-                    <td>{row.above_threshold ? <span className="bdot" /> : ""}</td>
-                  </tr>
-                ))}
+                {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => {
+                  const isBreech = +row.above_threshold === 1;
+                  const isoAnom  = +row.iso_prediction === -1;
+                  const lofAnom  = +row.lof_prediction === -1;
+                  return (
+                    <tr key={row.date} className={isBreech ? "ar" : ""}>
+                      <td className="f-date">{row.date.slice(5)}</td>
+                      <td><span className="f-risk" style={{ color: scoreColor(row.combined_risk_score) }}>{pct(row.combined_risk_score)}</span></td>
+                      <td className={+row.after_hours_session_count > 0 ? "f-val-hi" : "f-val"}>{row.after_hours_session_count}</td>
+                      <td className={+row.usb_count > 0 ? "f-val-hi" : "f-val"}>{row.usb_count}</td>
+                      <td>{+row.usb_after_hours_flag ? <span className="flag-pill pill-red">YES</span> : <span className="f-nil">—</span>}</td>
+                      <td>{+row.job_site_visits_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
+                      <td>{+row.weekend_session_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
+                      <td>{isoAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
+                      <td>{lofAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
+                      <td>{isBreech ? <span className="bdot" /> : ""}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

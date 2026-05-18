@@ -35,7 +35,8 @@ def coerce_users(rows):
                     r[col] = int(r[col])
                 except (ValueError, TypeError):
                     r[col] = 0
-        for col in ("final_risk_score", "supervised_max", "supervised_mean", "unsupervised_max"):
+        for col in ("final_risk_score", "supervised_max", "supervised_mean", "unsupervised_max",
+                    "unsupervised_mean", "iso_score_norm_mean", "lof_score_norm_mean"):
             if col in r:
                 try:
                     r[col] = float(r[col])

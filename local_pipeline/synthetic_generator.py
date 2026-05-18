@@ -160,11 +160,9 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
 
         row[col] = val
 
-    # Cap after-hours logins at 1 for normal users — values above 1
-    # mean the user is regularly logging in at midnight or 5am, which
-    # the RF reads as suspicious. Normal users occasionally work late
-    # but not multiple after-hours sessions per day.
-    row['after_hours_session_count'] = min(row['after_hours_session_count'], 1)
+    # Cap after-hours logins at 2 for normal users — CERT normal mean is 0.33
+    # with std=1.0, so values up to 2 are within normal range.
+    row['after_hours_session_count'] = min(row['after_hours_session_count'], 2)
 
     # Anchor z-scores with tight normal-day clipping [-1.5, 1.5]
     if baseline_stats is not None:
@@ -179,9 +177,11 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
                 stats['usb_count_zscore'], clip_min=-1.5, clip_max=1.5)
             row['usb_count_zscore_has_baseline'] = 1
 
-    # Normal users do not job search
-    row['job_site_visits_flag']     = 0
-    row['job_search_plus_usb_week'] = 0
+    # job_site_visits_flag: CERT normal mean is ~0.49 — roughly half of normal
+    # days include job site visits. Do NOT force to 0 or the RF learns
+    # job_site_visits_flag=1 means insider, which is wrong.
+    # job_search_plus_usb_week: CERT normal mean is ~0.12 — keep sampled value.
+    # (Previously forced to 0 — that was incorrect and biased the RF.)
 
     return row
 

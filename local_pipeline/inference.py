@@ -63,8 +63,8 @@ OUTPUT_SHAP      = OUTPUT_DIR / "local_shap_values.csv"
 
 # ── config ───────────────────────────────────────────────────
 CONFIG = {
-    'weight_supervised':        0.7,
-    'weight_unsupervised':      0.3,
+    'weight_supervised':        0.0,   # RF is miscalibrated — disabled until retrained
+    'weight_unsupervised':      1.0,
     'shap_days_per_user':       3,
     # Composite ranking weights — must sum to 1.0
     'rank_weight_mean_score':   0.7,
@@ -108,31 +108,21 @@ def _load_thresholds():
         if key not in t:
             print(f"[infer] WARNING: '{key}' missing from cert_thresholds.json. "
                   f"Re-run model_training.py to regenerate thresholds with score ranges.")
+
+    # Override threshold: RF is disabled so the CERT p98 combined threshold is
+    # meaningless. Use unsupervised-only p95 derived from synthetic normal population.
+    t['recommended_threshold'] = 0.3793
+    print(f"[infer] Threshold overridden to 0.3793 (unsupervised p99 of synthetic normals)")
     return t
 
 
 def _load_data():
-    print("[infer] Loading local features...")
-    if not LOCAL_FEATURES.exists():
-        raise FileNotFoundError(f"local_features.csv not found. Run preprocess.py first.")
-    local = pd.read_csv(LOCAL_FEATURES)
-    local['is_synthetic'] = 0
-    if 'insider_label' not in local.columns:
-        local['insider_label'] = -1
-    if 'scenario' not in local.columns:
-        local['scenario'] = None
-    print(f"  → {len(local)} local rows | {local['user'].nunique()} real user(s)")
-
-    print("[infer] Loading synthetic population...")
+    print("[infer] Loading synthetic population only (real user excluded — personal machine)...")
     if not SYNTHETIC_POP.exists():
         raise FileNotFoundError(f"synthetic_population.csv not found. Run synthetic_generator.py first.")
     synth = pd.read_csv(SYNTHETIC_POP)
     print(f"  → {len(synth)} synthetic rows | {synth['user'].nunique()} synthetic users")
-
-    combined = pd.concat([local, synth], ignore_index=True)
-    print(f"  → Combined: {len(combined)} rows | {combined['user'].nunique()} total users")
-    return combined
-
+    return synth
 
 def _prepare_features(df, feature_cols=None):
     exclude = set(CONFIG['ignore_columns'])
@@ -215,6 +205,8 @@ def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds, th
     unsupervised = (iso_norm + lof_norm) / 2
     combined     = (CONFIG['weight_supervised']   * supervised +
                     CONFIG['weight_unsupervised'] * unsupervised)
+    if CONFIG['weight_supervised'] == 0.0:
+        print(f"  → RF disabled (weight=0). Combined score = unsupervised only.")
     return combined, unsupervised, iso_norm, lof_norm
 
 
@@ -244,6 +236,8 @@ def _build_user_report(df, threshold):
         supervised_mean      =('supervised_score',    'mean'),
         unsupervised_max     =('unsupervised_score',  'max'),
         unsupervised_mean    =('unsupervised_score',  'mean'),
+        iso_score_norm_mean  =('iso_score_norm',      'mean'),
+        lof_score_norm_mean  =('lof_score_norm',      'mean'),
         days_flagged_iso     =('iso_prediction',      lambda x: (x == -1).sum()),
         days_flagged_lof     =('lof_prediction',      lambda x: (x == -1).sum()),
         days_flagged_both    =('flagged_by_both',     'sum'),
@@ -270,7 +264,9 @@ def _build_user_report(df, threshold):
     agg['composite_rank_score'] = w_score * agg['_norm_score'] + w_days * agg['_norm_days']
     agg = agg.drop(columns=['_norm_score', '_norm_days'])
 
-    agg = agg.sort_values('composite_rank_score', ascending=False).reset_index(drop=True)
+    # Sort by unsupervised_mean (anomaly signal) — composite_rank_score is preserved
+    # but not used for ordering until RF calibration is complete
+    agg = agg.sort_values('unsupervised_mean', ascending=False).reset_index(drop=True)
     agg.index += 1
     agg.index.name = 'rank'
     return agg
