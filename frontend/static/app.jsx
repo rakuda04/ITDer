@@ -2,11 +2,11 @@ const { useState, useEffect, useRef } = React;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const pct        = (v) => (Number(v) * 100).toFixed(1) + "%";
-const riskTier   = (s) => s >= 0.85 ? "critical" : s >= 0.70 ? "high" : "medium";
-const scoreColor = (v) => v >= 0.85 ? "#dc2626" : v >= 0.70 ? "#d97706" : "#059669";
-const scoreGrad  = (v) => v >= 0.85
+const riskTier   = (s) => s >= 0.75 ? "critical" : s >= 0.40 ? "high" : "medium";
+const scoreColor = (v) => v >= 0.75 ? "#dc2626" : v >= 0.40 ? "#d97706" : "#059669";
+const scoreGrad  = (v) => v >= 0.75
   ? "linear-gradient(90deg,#dc2626,#ef4444)"
-  : v >= 0.70
+  : v >= 0.40
   ? "linear-gradient(90deg,#d97706,#f59e0b)"
   : "linear-gradient(90deg,#059669,#10b981)";
 
@@ -21,7 +21,7 @@ const TIER_DARK = {
   medium:   { label: "Medium",   dot: "#34d399", text: "#34d399", bg: "#021c12", border: "#064e3b" },
 };
 
-const TABS = [["overview","Overview"],["timeline","Timeline"],["flags","Flags"],["shap","SHAP"]];
+const TABS = [["overview","Overview"],["timeline","Timeline"],["flags","Flags"],["shap","SHAP"],["info","Info"]];
 
 // ── theme ─────────────────────────────────────────────────────────────────────
 function getInitialDark() {
@@ -59,11 +59,14 @@ function StatCard({ label, value, cls, accent }) {
   );
 }
 
-function ScoreBar({ label, value }) {
+function ScoreBar({ label, sub, value }) {
   return (
     <div className="srow">
       <div className="smeta">
-        <span className="slb2">{label}</span>
+        <div>
+          <span className="slb2">{label}</span>
+          {sub && <div className="ssub">{sub}</div>}
+        </div>
         <span className="snum">{pct(value)}</span>
       </div>
       <div className="strk">
@@ -115,14 +118,14 @@ function TimelineChart({ daily, sel, dark }) {
             pointBorderWidth: rows.map((d) => d.above_threshold ? 5 : 0),
           },
           {
-            label: "Supervised",
-            data: rows.map((d) => +(d.supervised_score * 100).toFixed(1)),
+            label: "IsoForest",
+            data: rows.map((d) => +(d.iso_score_norm * 100).toFixed(1)),
             borderColor: "#6366f1", borderDash: [6, 3], tension: 0.35,
             fill: false, borderWidth: 1.5, pointRadius: 0,
           },
           {
-            label: "Unsupervised",
-            data: rows.map((d) => +(d.unsupervised_score * 100).toFixed(1)),
+            label: "Elliptic Env",
+            data: rows.map((d) => +(d.lof_score_norm * 100).toFixed(1)),
             borderColor: "#059669", borderDash: [2, 4], tension: 0.35,
             fill: false, borderWidth: 1.5, pointRadius: 0,
           },
@@ -204,19 +207,136 @@ function ShapChart({ shap, dark }) {
   return <canvas ref={ref} aria-label="SHAP feature attribution" />;
 }
 
+
+// ── stepper input ─────────────────────────────────────────────────────────────
+function Stepper({ value, onChange, min, max, step = 1 }) {
+  const dec = () => onChange(Math.max(min ?? -Infinity, value - step));
+  const inc = () => onChange(Math.min(max ??  Infinity, value + step));
+  return (
+    <div className="stepper">
+      <button className="stepper-btn" onClick={dec}>−</button>
+      <span className="stepper-val">{value}</span>
+      <button className="stepper-btn" onClick={inc}>+</button>
+    </div>
+  );
+}
+
+// ── settings panel ────────────────────────────────────────────────────────────
+function SettingsPanel({ onClose, onDone, dark }) {
+  const [synthCfg, setSynthCfg] = React.useState({
+    n_normal_users: 27, n_insider_users: 3, n_days: 90,
+    normal_phase_days: 20, phased: true, random_scenarios: true,
+  });
+  const [inferCfg, setInferCfg] = React.useState({
+    threshold: 0.3793,
+  });
+  const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
+  const [log, setLog]         = React.useState(null); // {ok, text}
+
+  const run = async (endpoint, cfg) => {
+    setRunning(endpoint);
+    setLog(null);
+    try {
+      const r = await fetch(`/api/run/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      const d = await r.json();
+      setLog({ ok: d.ok, text: d.ok ? '✓ Done' : (d.output || 'Error') });
+      if (d.ok) onDone();
+    } catch(e) {
+      setLog({ ok: false, text: String(e) });
+    }
+    setRunning(null);
+  };
+
+
+
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-panel" onClick={e => e.stopPropagation()}>
+        <div className="settings-hdr">
+          <span className="settings-title">Pipeline settings</span>
+          <button className="settings-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-title">Synthetic population</div>
+          <div className="settings-row">
+            <label>Normal users</label>
+            <Stepper value={synthCfg.n_normal_users} min={1} max={100}
+              onChange={v => setSynthCfg(p => ({...p, n_normal_users: v}))} />
+          </div>
+          <div className="settings-row">
+            <label>Insider users</label>
+            <Stepper value={synthCfg.n_insider_users} min={1} max={20}
+              onChange={v => setSynthCfg(p => ({...p, n_insider_users: v}))} />
+          </div>
+          <div className="settings-row">
+            <label>Days per user</label>
+            <Stepper value={synthCfg.n_days} min={10} max={365}
+              onChange={v => setSynthCfg(p => ({...p, n_days: v}))} />
+          </div>
+          <div className="settings-row">
+            <label>Normal phase days</label>
+            <Stepper value={synthCfg.normal_phase_days} min={1} max={synthCfg.n_days - 1}
+              onChange={v => setSynthCfg(p => ({...p, normal_phase_days: v}))} />
+          </div>
+          <div className="settings-row">
+            <label>Phased behavior</label>
+            <input type="checkbox" checked={synthCfg.phased}
+              onChange={e => setSynthCfg(p => ({...p, phased: e.target.checked}))} />
+          </div>
+          <div className="settings-row">
+            <label>Random scenarios</label>
+            <input type="checkbox" checked={synthCfg.random_scenarios}
+              onChange={e => setSynthCfg(p => ({...p, random_scenarios: e.target.checked}))} />
+          </div>
+          <button className="settings-run" disabled={running === 'synthetic'}
+            onClick={() => run('synthetic', synthCfg)}>
+            {running === 'synthetic' ? 'Running…' : 'Run synthetic generator'}
+          </button>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-title">Inference</div>
+          <div className="settings-row">
+            <label>Alert threshold</label>
+            <Stepper value={inferCfg.threshold} min={0.1} max={0.99} step={0.01}
+              onChange={v => setInferCfg({ threshold: +v.toFixed(4) })} />
+          </div>
+          <div className="settings-note">Unsupervised score above which a day is flagged as anomalous. p99 of synthetic normals = 0.3793.</div>
+          <button className="settings-run" disabled={running === 'inference'}
+            onClick={() => run('inference', inferCfg)}>
+            {running === 'inference' ? 'Running…' : 'Run inference'}
+          </button>
+        </div>
+
+        {log && (
+          <div className={`settings-log ${log.ok ? 'ok' : 'err'}`}>{log.text}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── main app ──────────────────────────────────────────────────────────────────
 function App() {
   const { data: usersData, loading: uL, error: uE } = useApi("/api/users");
   const { data: dailyAll,  loading: dL, error: dE } = useApi("/api/daily");
   const { data: shapAll,   loading: sL, error: sE } = useApi("/api/shap");
 
-  const [sel, setSel] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [sel, setSel]   = useState(null);
+  const [tab, setTab]   = useState("overview");
   const [dark, setDark] = useState(getInitialDark);
+  const [showSettings, setShowSettings] = useState(false);
 
-  // apply theme on mount and on change
   useEffect(() => { applyTheme(dark); }, [dark]);
-
+  const reloadData = () => {
+    // Force re-fetch by reloading the page
+    window.location.reload();
+  };
   const toggleTheme = () => setDark((d) => !d);
 
   useEffect(() => {
@@ -225,10 +345,13 @@ function App() {
 
   const loading  = uL || dL || sL;
   const error    = uE || dE || sE;
+  const sortedUsers = [...usersData].sort((a, b) =>
+    (b.unsupervised_mean ?? b.unsupervised_max ?? 0) - (a.unsupervised_mean ?? a.unsupervised_max ?? 0)
+  );
   const user     = usersData.find((u) => u.user === sel);
   const daily    = dailyAll.filter((d) => d.user === sel);
   const shap     = shapAll.filter((d) => d.user === sel);
-  const tier     = user ? riskTier(user.final_risk_score) : "medium";
+  const tier     = user ? riskTier(user.unsupervised_mean ?? user.unsupervised_max) : "medium";
   const T        = dark ? TIER_DARK[tier] : TIER[tier];
   const flagged  = daily.filter((d) => d.above_threshold).length;
   const breaches = daily.filter((d) => d.above_threshold).map((d) => d.date.slice(5)).slice(-3);
@@ -267,15 +390,18 @@ function App() {
           </div>
         </div>
         <div className="hdr-right">
-          <ThemeToggle dark={dark} onToggle={toggleTheme} />
+          <div className="hdr-controls">
+            <button className="settings-btn" onClick={() => setShowSettings(true)} title="Pipeline settings">⚙</button>
+            <ThemeToggle dark={dark} onToggle={toggleTheme} />
+          </div>
           <select
             className="usr-sel"
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {usersData.map((u) => (
+            {sortedUsers.map((u, i) => (
               <option key={u.user} value={u.user}>
-                #{u.rank} {u.user} · {(u.final_risk_score * 100).toFixed(1)}%
+                #{i + 1} {u.user}
               </option>
             ))}
           </select>
@@ -285,16 +411,16 @@ function App() {
       {/* stat cards */}
       {user && (
         <div className="stats">
-          <StatCard label="Final risk"       value={pct(user.final_risk_score)}  cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="r" />
-          <StatCard label="Supervised max"   value={pct(user.supervised_max)}    cls="a" accent="a" />
-          <StatCard label="Unsupervised max" value={pct(user.unsupervised_max)}  cls="m" accent="b" />
-          <StatCard label="Days breached"    value={flagged}                     cls={flagged > 2 ? "r" : "g"} accent="r" />
-          <StatCard label="ISO anomalies"    value={user.days_flagged_iso}       cls={user.days_flagged_iso > 5 ? "r" : "m"} accent="b" />
-          <StatCard label="LOF anomalies"    value={user.days_flagged_lof}       cls={user.days_flagged_lof > 5 ? "r" : "m"} accent="b" />
+          <StatCard label="Rank"             value={`#${sortedUsers.findIndex(u => u.user === sel) + 1} of ${usersData.length}`}                  cls={user.rank <= 3 ? "r" : user.rank <= 10 ? "a" : "g"} accent="r" />
+          <StatCard label="Anomaly signal"   value={pct(user.unsupervised_mean ?? user.unsupervised_max)}     cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="a" />
+          <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : user.days_flagged_iso > 0 ? "a" : "g"} accent="b" />
+          <StatCard label="EE anomalies"     value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : user.days_flagged_lof > 0 ? "a" : "g"} accent="b" />
+          <StatCard label="Both flagged"     value={user.days_flagged_both}       cls={user.days_flagged_both > 0 ? "r" : "g"} accent="r" />
+          <StatCard label="Days monitored"   value={user.total_days}              cls="m" accent="b" />
         </div>
       )}
 
-      {/* identity bar */}
+      {/* identity bar — no blinking dot */}
       {user && (
         <div className="ibar">
           <div className="av" style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text }}>
@@ -302,22 +428,23 @@ function App() {
           </div>
           <div style={{ flex: 1 }}>
             <div className="iname">{user.user}</div>
-            <div className="imeta">rank #{user.rank} · {user.is_synthetic ? "synthetic" : "real user"} · peak {user.peak_date}</div>
+            <div className="imeta">rank #{sortedUsers.findIndex(u => u.user === sel) + 1} · {user.is_synthetic ? "synthetic" : "real user"} · peak {user.peak_date}</div>
           </div>
-          <div className="tbadge" style={{ background: T.bg, color: T.text, borderColor: T.border }}>
-            <span className="tdot" style={{ background: T.dot }} />
-            {T.label}
-          </div>
+
         </div>
       )}
 
       {/* tabs */}
       <div className="tabs">
-        {TABS.map(([id, lbl]) => (
+        {TABS.filter(([id]) => id !== "info").map(([id, lbl]) => (
           <button key={id} className={`tb${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>
             {lbl}
           </button>
         ))}
+        <span className="tabs-spacer" />
+        <button className={`tb${tab === "info" ? " on" : ""}`} onClick={() => setTab("info")}>
+          Info
+        </button>
       </div>
 
       {/* overview */}
@@ -326,19 +453,22 @@ function App() {
           <div className="panel">
             <div className="ptitle">Risk leaderboard — {usersData.length} users</div>
             <div className="lb-scroll">
-              {usersData.map((u) => (
+              {sortedUsers.map((u, i) => (
                 <div
                   key={u.user}
                   className={`lbrow${u.user === sel ? " sel" : ""}`}
                   onClick={() => setSel(u.user)}
                 >
-                  <span className="lbrnk">{u.rank}</span>
+                  <span className="lbrnk">{i + 1}</span>
                   <span className="lbnm">{u.user}</span>
                   <div className="lbtrack">
-                    <div className="lbfill" style={{ width: (u.final_risk_score * 100) + "%", background: scoreGrad(u.final_risk_score) }} />
+                    <div className="lbfill" style={{ width: ((u.unsupervised_mean ?? u.unsupervised_max) * 100) + "%", background: scoreGrad(u.unsupervised_mean ?? u.unsupervised_max) }} />
                   </div>
-                  <span className="lbsc" style={{ color: scoreColor(u.final_risk_score) }}>
-                    {(u.final_risk_score * 100).toFixed(0)}%
+                  <span className="lbdays" style={{ color: u.days_flagged_both > 0 ? scoreColor(u.unsupervised_mean ?? u.unsupervised_max) : "var(--text-4)" }}>
+                    {u.days_flagged_both > 0 ? `${u.days_flagged_both}d` : "—"}
+                  </span>
+                  <span className="lbsc" style={{ color: scoreColor(u.unsupervised_mean ?? u.unsupervised_max) }}>
+                    {((u.unsupervised_mean ?? u.unsupervised_max) * 100).toFixed(0)}%
                   </span>
                 </div>
               ))}
@@ -347,16 +477,17 @@ function App() {
 
           <div className="panel">
             <div className="ptitle">Score breakdown — {user.user}</div>
-            <ScoreBar label="Final risk score"  value={user.final_risk_score} />
-            <ScoreBar label="Supervised max"    value={user.supervised_max} />
-            <ScoreBar label="Supervised mean"   value={user.supervised_mean} />
-            <ScoreBar label="Unsupervised max"  value={user.unsupervised_max} />
+            <ScoreBar label="Avg anomaly signal"  sub="Mean combined score across all days — matches leaderboard %"   value={user.unsupervised_mean ?? user.unsupervised_max} />
+            <ScoreBar label="IsoForest mean"      sub="Avg IsoForest isolation score — how separated from population"  value={user.iso_score_norm_mean ?? 0} />
+            <ScoreBar label="Elliptic Env mean"   sub="Avg EE score — distance from normal cluster"                    value={user.lof_score_norm_mean ?? 0} />
+
             <div className="ptitle" style={{ marginTop: 20 }}>Anomaly detection</div>
             <div className="anogrid">
               {[
-                ["ISO flagged",  user.days_flagged_iso,  "var(--accent)"],
-                ["LOF flagged",  user.days_flagged_lof,  "var(--green)"],
-                ["Both flagged", user.days_flagged_both, "var(--red)"],
+                ["Days flagged", user.days_above_threshold, "var(--red)"],
+                ["ISO flagged",  user.days_flagged_iso,     "var(--accent)"],
+                ["EE flagged",   user.days_flagged_lof,     "var(--green)"],
+                ["Both flagged", user.days_flagged_both,    "var(--red)"],
               ].map(([lbl, val, col]) => (
                 <div className="anocell" key={lbl}>
                   <div className="anonum" style={{ color: col }}>{val}</div>
@@ -374,7 +505,7 @@ function App() {
           <div className="panel-hdr">
             <div className="ptitle" style={{ margin: 0 }}>Daily risk score — {sel}</div>
             <div className="legend">
-              {[["Combined","#dc2626","solid"],["Supervised","#6366f1","dashed"],["Unsupervised","#059669","dotted"]].map(([lbl, col, sty]) => (
+              {[["Combined","#dc2626","solid"],["IsoForest","#6366f1","dashed"],["Elliptic Env","#059669","dotted"]].map(([lbl, col, sty]) => (
                 <span key={lbl} className="legitem">
                   <span className="legline" style={sty === "solid" ? { background: col } : { background: "none", border: `1.5px ${sty} ${col}` }} />
                   {lbl}
@@ -382,50 +513,62 @@ function App() {
               ))}
               <span className="legitem">
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
-                Breach
+                Threshold breach
               </span>
             </div>
           </div>
           <div style={{ position: "relative", width: "100%", height: 260 }}>
             <TimelineChart daily={daily} sel={sel} dark={dark} />
           </div>
-          {breaches.length > 0 && (
-            <div className="breach">
-              <span style={{ fontSize: 14 }}>⚠</span>
-              <span className="btxt">Recent threshold breaches: {breaches.join(" · ")}</span>
-            </div>
-          )}
         </div>
       )}
 
       {/* flags table */}
       {tab === "flags" && (
         <div className="panel">
-          <div className="ptitle">Behavioral flags — {sel} (most recent 20)</div>
-          <div className="sx">
+          <div className="panel-hdr">
+            <div className="ptitle" style={{ margin: 0 }}>Behavioral flags — {sel}</div>
+            <div className="legend">
+              <span className="legitem"><span className="flag-pill pill-red">ANOM</span> Anomaly detected</span>
+              <span className="legitem"><span className="bdot" style={{ background: "var(--red)" }} /> Above threshold</span>
+            </div>
+          </div>
+          <div className="sx" style={{ marginTop: 14 }}>
             <table className="ftable">
               <thead>
                 <tr>
-                  {["Date","Risk","AH sess","USB","USB A/H","Job site","Weekend","ISO","LOF","⚑"].map((h) => (
-                    <th key={h}>{h}</th>
-                  ))}
+                  <th>Date</th>
+                  <th>Risk score</th>
+                  <th>After-hours sessions</th>
+                  <th>USB devices</th>
+                  <th>USB after-hours</th>
+                  <th>Job site visit</th>
+                  <th>Weekend session</th>
+                  <th>IsoForest</th>
+                  <th>Elliptic Env</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => (
-                  <tr key={row.date} className={row.above_threshold ? "ar" : ""}>
-                    <td style={{ color: "var(--text-3)" }}>{row.date.slice(5)}</td>
-                    <td style={{ color: scoreColor(row.combined_risk_score), fontWeight: 600 }}>{pct(row.combined_risk_score)}</td>
-                    <td>{row.after_hours_session_count}</td>
-                    <td>{row.usb_count}</td>
-                    <td className={row.usb_after_hours_flag ? "fy" : "fok"}>{row.usb_after_hours_flag ? "YES" : "—"}</td>
-                    <td className={row.job_site_visits_flag ? "fw" : "fok"}>{row.job_site_visits_flag ? "YES" : "—"}</td>
-                    <td className={row.weekend_session_flag ? "fw" : "fok"}>{row.weekend_session_flag ? "YES" : "—"}</td>
-                    <td>{row.iso_prediction == -1 ? <span className="fanom">ANOM</span> : <span className="fnorm">ok</span>}</td>
-                    <td>{row.lof_prediction == -1 ? <span className="fanom">ANOM</span> : <span className="fnorm">ok</span>}</td>
-                    <td>{row.above_threshold ? <span className="bdot" /> : ""}</td>
-                  </tr>
-                ))}
+                {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => {
+                  const isBreech = +row.above_threshold === 1;
+                  const isoAnom  = +row.iso_prediction === -1;
+                  const lofAnom  = +row.lof_prediction === -1;
+                  return (
+                    <tr key={row.date} className={isBreech ? "ar" : ""}>
+                      <td className="f-date">{row.date.slice(5)}</td>
+                      <td><span className="f-risk" style={{ color: scoreColor(row.combined_risk_score) }}>{pct(row.combined_risk_score)}</span></td>
+                      <td className={+row.after_hours_session_count > 0 ? "f-val-hi" : "f-val"}>{row.after_hours_session_count}</td>
+                      <td className={+row.usb_count > 0 ? "f-val-hi" : "f-val"}>{row.usb_count}</td>
+                      <td>{+row.usb_after_hours_flag ? <span className="flag-pill pill-red">YES</span> : <span className="f-nil">—</span>}</td>
+                      <td>{+row.job_site_visits_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
+                      <td>{+row.weekend_session_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
+                      <td>{isoAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
+                      <td>{lofAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
+                      <td>{isBreech ? <span className="bdot" /> : ""}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -464,11 +607,56 @@ function App() {
         </div>
       )}
 
+      {/* info tab */}
+      {tab === "info" && user && (
+        <div className="info-grid">
+
+          <div className="panel info-panel">
+            <div className="ptitle">CERT insider scenarios</div>
+
+            <div className="scenario-card sc-1">
+              <div className="sc-header">
+                <span className="sc-badge">Scenario 1</span>
+                <span className="sc-name">The Disgruntled Employee — Sabotage</span>
+              </div>
+              <div className="sc-signals">After-hours logons · USB exfiltration · No prior USB history</div>
+              <div className="sc-desc">Employee plants malware or copies files after hours using USB. Typically no prior USB activity, making the spike highly anomalous. Detected by IsoForest isolating the unusual USB + after-hours combination.</div>
+            </div>
+
+            <div className="scenario-card sc-2">
+              <div className="sc-header">
+                <span className="sc-badge">Scenario 2</span>
+                <span className="sc-name">The Departing Employee — Data Theft</span>
+              </div>
+              <div className="sc-signals">Job site visits · USB spike above baseline · Job search + USB compound signal</div>
+              <div className="sc-desc">Employee preparing to leave begins visiting job sites and copying files to USB. The compound signal (job search week + USB usage) is a strong indicator. Elliptic Env detects the behavioral drift from normal cluster.</div>
+            </div>
+
+            <div className="scenario-card sc-3">
+              <div className="sc-header">
+                <span className="sc-badge">Scenario 3</span>
+                <span className="sc-name">The Disgruntled SysAdmin — Sabotage</span>
+              </div>
+              <div className="sc-signals">After-hours logons · USB usage · Weekend sessions</div>
+              <div className="sc-desc">Privileged user with system access performs after-hours operations including weekend sessions. Similar to Scenario 1 but typically more sustained and with weekend activity. Both IsoForest and Elliptic Env tend to agree on these days.</div>
+            </div>
+
+            <div className="sc-note">Scenarios sourced from CERT Insider Threat Dataset r4.2. Synthetic insiders in this pipeline are assigned one scenario each and exhibit that behavioral pattern during their active threat phase.</div>
+          </div>
+
+        </div>
+      )}
+
+      {showSettings && (
+        <SettingsPanel
+          onClose={() => setShowSettings(false)}
+          onDone={() => { setShowSettings(false); reloadData(); }}
+          dark={dark}
+        />
+      )}
     </div>
   );
 }
 
-// apply theme before first render to avoid flash
 applyTheme(getInitialDark());
-
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import json
 from datetime import timedelta
 
 # --- 1. DYNAMIC PATH CALCULATION ---
@@ -12,6 +13,9 @@ class FeatureEngineer:
     def __init__(self, config):
         self.config = config
         self.base_path = config['base_path']
+        # Accumulates population stats from _calculate_zscore calls so
+        # build_pipeline can save them to cert_baseline_stats.json
+        self._baseline_stats = {}
 
     def load_file(self, filename):
         """Loads a CSV safely."""
@@ -66,6 +70,10 @@ class FeatureEngineer:
               the final fillna(0) sweep so NaN is preserved into the output.
               Your model's imputation step should handle these deliberately
               (e.g. fill with 0 only after using has_baseline as a feature).
+
+        Population stats (mean, std of the raw value_col across all users)
+        are saved to self._baseline_stats so build_pipeline can write them
+        to cert_baseline_stats.json for use by synthetic_generator.py.
         """
         MIN_BASELINE_DAYS = self.config.get('min_baseline_days', 5)
 
@@ -74,6 +82,14 @@ class FeatureEngineer:
             std='std',
             count='count'
         ).reset_index()
+
+        # Save population-level stats (mean of per-user means, mean of per-user stds)
+        # for use by synthetic_generator.py to anchor z-scores to CERT distribution
+        self._baseline_stats[value_col] = {
+            'population_mean': float(stats['mean'].mean()),
+            'population_std':  float(stats['mean'].std()),
+            'typical_user_std': float(stats['std'].median()),
+        }
 
         merged = df.merge(stats, on=user_col, how='left')
 
@@ -119,7 +135,6 @@ class FeatureEngineer:
             logon_count=('activity', lambda x: (x == 'Logon').sum())
         ).reset_index()
 
-
         result = self._calculate_zscore(daily, 'user', 'logon_count', 'logon_count_zscore')
         # Drop raw logon_count — zscore and has_baseline capture its information.
         # Keeping the raw count would give the RF a redundant shortcut that
@@ -159,14 +174,13 @@ class FeatureEngineer:
         df['is_job'] = df['url'].str.contains(
             self.config['job_keywords'], case=False, na=False
         ).astype(int)
-        
 
         daily = df.groupby(['user', 'day']).agg(
             job_site_visits=('is_job', 'sum'),
         ).reset_index()
 
         daily['job_site_visits_flag'] = (daily['job_site_visits'] > 0).astype(int)
-       
+
         return daily.drop(columns=['job_site_visits'])
 
     def build_pipeline(self):
@@ -203,13 +217,26 @@ class FeatureEngineer:
 
         final_df.reset_index(inplace=True)
 
-
-
         output_path = os.path.normpath(
             os.path.join(self.config['base_path'], self.config['output_file'])
         )
         final_df.to_csv(output_path, index=False)
         print(f"SUCCESS! Shape: {final_df.shape} saved to {output_path}")
+
+        # --- Save population baseline stats for synthetic_generator.py ---
+        # These anchor synthetic users' z-scores to the CERT population
+        # distribution rather than each user's own 30-day history.
+        # synthetic_generator.py reads this file to compute z-scores as:
+        #   (generated_count - population_mean) / typical_user_std
+        baseline_path = os.path.normpath(
+            os.path.join(self.config['base_path'], 'output', 'cert_baseline_stats.json')
+        )
+        with open(baseline_path, 'w') as f:
+            json.dump(self._baseline_stats, f, indent=2)
+        print(f"Baseline stats saved to {baseline_path}")
+        print(f"  logon_count: mean={self._baseline_stats.get('logon_count', {}).get('population_mean', 'N/A'):.2f}")
+        print(f"  usb_count:   mean={self._baseline_stats.get('usb_count', {}).get('population_mean', 'N/A'):.2f}")
+
         return final_df
 
 
