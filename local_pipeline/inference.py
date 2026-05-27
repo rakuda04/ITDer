@@ -63,8 +63,8 @@ OUTPUT_SHAP      = OUTPUT_DIR / "local_shap_values.csv"
 
 # ── config ───────────────────────────────────────────────────
 CONFIG = {
-    'weight_supervised':        0.0,   # RF is miscalibrated — disabled until retrained
-    'weight_unsupervised':      1.0,
+    'weight_supervised':        0.5,   # RF retrained on 100-user CERT subset — re-enabled
+    'weight_unsupervised':      0.5,
     'shap_days_per_user':       3,
     # Composite ranking weights — must sum to 1.0
     'rank_weight_mean_score':   0.7,
@@ -117,12 +117,24 @@ def _load_thresholds():
 
 
 def _load_data():
-    print("[infer] Loading synthetic population only (real user excluded — personal machine)...")
+    print("[infer] Loading synthetic population + real local user(s)...")
     if not SYNTHETIC_POP.exists():
         raise FileNotFoundError(f"synthetic_population.csv not found. Run synthetic_generator.py first.")
     synth = pd.read_csv(SYNTHETIC_POP)
     print(f"  → {len(synth)} synthetic rows | {synth['user'].nunique()} synthetic users")
-    return synth
+
+    if LOCAL_FEATURES.exists():
+        local = pd.read_csv(LOCAL_FEATURES)
+        local['is_synthetic']  = 0
+        local['insider_label'] = 0
+        local['scenario']      = None
+        print(f"  → {len(local)} local rows | {local['user'].nunique()} real user(s): {local['user'].unique().tolist()}")
+        df = pd.concat([synth, local], ignore_index=True)
+    else:
+        print(f"  [!] local_model_intake.csv not found — scoring synthetic only")
+        df = synth
+
+    return df
 
 def _prepare_features(df, feature_cols=None):
     exclude = set(CONFIG['ignore_columns'])
@@ -158,24 +170,65 @@ def _run_supervised(X, models, feature_cols):
     return scores, train_cols
 
 
-def _run_iso(X, models, feature_cols):
-    print("[infer] Stage 2: IsoForest scoring...")
-    iso    = models['iso']
+def _run_iso(X, models, feature_cols, df):
+    """
+    Refit IsoForest on the current local population before scoring.
+
+    The CERT-trained IsoForest learned 'normal' from 1,000 CERT users with
+    inflated USB baselines (~1 USB/day). The local synthetic population uses
+    realistic baselines (~0.1 USB/day), so the CERT model does not flag USB
+    spikes that are obvious outliers locally. Refitting on the current
+    population ensures the anomaly boundary reflects the actual distribution.
+    """
+    from sklearn.ensemble import IsolationForest
+    print("[infer] Stage 2: IsoForest — refitting on local population...")
+
+    normal_mask = df['insider_label'] == 0
+    X_normal    = X[normal_mask.values]
+
+    iso = IsolationForest(
+        contamination = 0.05,
+        n_estimators  = 200,
+        random_state  = 42,
+        n_jobs        = -1,
+    )
+    iso.fit(X_normal.values)
+
     preds  = iso.predict(X.values)
     scores = iso.decision_function(X.values)
+    print(f"  → Refitted on {len(X_normal)} normal rows")
     print(f"  → Flagged {(preds == -1).sum()} rows")
     return preds, scores
 
 
-def _run_elliptic(X, models):
-    print("[infer] Stage 3: Elliptic Envelope scoring...")
-    # Load CERT-trained EE — judging local data against CERT normal baseline
-    saved  = models['elliptic']
-    ee     = saved['model']
-    scaler = saved['scaler']
-    X_scaled = scaler.transform(X.values)
+def _run_elliptic(X, models, df):
+    """
+    Refit Elliptic Envelope on the current local normal population.
+
+    Same reasoning as IsoForest — CERT-trained scaler and covariance reflect
+    inflated CERT distributions, not realistic local behavior.
+    """
+    from sklearn.covariance import EllipticEnvelope
+    from sklearn.preprocessing import StandardScaler
+    print("[infer] Stage 3: Elliptic Envelope — refitting on local population...")
+
+    normal_mask     = df['insider_label'] == 0
+    X_normal        = X[normal_mask.values]
+
+    scaler          = StandardScaler()
+    X_normal_scaled = scaler.fit_transform(X_normal.values)
+    X_scaled        = scaler.transform(X.values)
+
+    ee = EllipticEnvelope(
+        contamination    = 0.05,
+        random_state     = 42,
+        support_fraction = 0.9,
+    )
+    ee.fit(X_normal_scaled)
+
     preds  = ee.predict(X_scaled)
     scores = ee.score_samples(X_scaled)
+    print(f"  → Refitted on {len(X_normal)} normal rows")
     print(f"  → Flagged {(preds == -1).sum()} rows")
     return preds, scores
 
@@ -266,7 +319,7 @@ def _build_user_report(df, threshold):
 
     # Sort by unsupervised_mean (anomaly signal) — composite_rank_score is preserved
     # but not used for ordering until RF calibration is complete
-    agg = agg.sort_values('unsupervised_mean', ascending=False).reset_index(drop=True)
+    agg = agg.sort_values('composite_rank_score', ascending=False).reset_index(drop=True)
     agg.index += 1
     agg.index.name = 'rank'
     return agg
@@ -291,10 +344,10 @@ def run():
     X_aligned = X[aligned_cols].fillna(0)
 
     # Stage 2 — IsoForest
-    iso_preds, iso_scores = _run_iso(X_aligned, models, aligned_cols)
+    iso_preds, iso_scores = _run_iso(X_aligned, models, aligned_cols, df)
 
     # Stage 3 — Elliptic Envelope
-    lof_preds, lof_scores = _run_elliptic(X_aligned, models)
+    lof_preds, lof_scores = _run_elliptic(X_aligned, models, df)
 
     # Stage 4 — Combined
     combined, unsupervised, iso_norm, lof_norm = _build_combined(
