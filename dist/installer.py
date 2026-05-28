@@ -14,10 +14,10 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 
 # ── config ───────────────────────────────────────────────────
-REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/main/local_pipeline"
-MODELS_BASE  = "https://raw.githubusercontent.com/rakuda04/ITDer/main/cert_pipeline/output/models"
+REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script/dist"
 INSTALL_DIR  = r"C:\ProgramData\itder"
 MODELS_DIR   = r"C:\ProgramData\itder\models"
+REF_DIR      = r"C:\ProgramData\itder\reference"
 
 FILES = [
     "config.py",
@@ -32,14 +32,24 @@ FILES = [
 ]
 
 MODEL_FILES = [
-    "elliptic_env.pkl",
-    "iso_forest.pkl",
-    "lof_scaler.pkl",
-    "rf_supervised.pkl",
-    "rf_supervised.pkl.cert_original",
+    "models/elliptic_env.pkl",
+    "models/iso_forest.pkl",
+    "models/lof_scaler.pkl",
+    "models/rf_supervised.pkl",
+    "models/rf_supervised.pkl.cert_original",
 ]
 
-DEPS = ["pandas", "requests", "pywin32", "scikit-learn", "numpy<2", "shap"]
+REFERENCE_FILES = [
+    "reference/cert_baseline_stats.json",
+    "reference/model_intake_final.csv",
+    "reference/cert_thresholds.json",
+]
+
+# install order matters — numpy must be pinned before shap
+DEPS = [
+    ["pandas", "requests", "pywin32", "scikit-learn"],
+    ["numpy<2", "shap"],
+]
 # ─────────────────────────────────────────────────────────────
 
 RUNNER_SCRIPT = """\
@@ -58,6 +68,7 @@ log("Pipeline started")
 scripts = [
     "data_collector.py",
     "local_preprocessor.py",
+    "synthetic_generator.py",
     "inference.py",
     "send_to_server.py",
 ]
@@ -114,13 +125,14 @@ def enable_audit_policies():
 
 
 def create_directories():
-    log(f"Creating {INSTALL_DIR}...")
+    log(f"Creating install directories...")
     dirs = [
         INSTALL_DIR,
         os.path.join(INSTALL_DIR, "output"),
         os.path.join(INSTALL_DIR, "collectors"),
         os.path.join(INSTALL_DIR, "processors"),
         MODELS_DIR,
+        REF_DIR,
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
@@ -137,34 +149,43 @@ def download_files():
         except Exception as e:
             fail(f"Failed to download {file}:\n{e}\n\nCheck your internet connection.")
 
-    # create __init__.py so Python treats subdirs as packages
     for subdir in ["collectors", "processors"]:
         init = os.path.join(INSTALL_DIR, subdir, "__init__.py")
         open(init, "w").close()
 
     log("Downloading model files...")
     for file in MODEL_FILES:
-        url  = f"{MODELS_BASE}/{file}"
-        dest = os.path.join(MODELS_DIR, file)
+        url  = f"{REPO_BASE}/{file}"
+        dest = os.path.join(INSTALL_DIR, file.replace("/", os.sep))
         log(f"  {file}")
         try:
             urllib.request.urlretrieve(url, dest)
         except Exception as e:
-            fail(f"Failed to download model {file}:\n{e}")
+            fail(f"Failed to download {file}:\n{e}")
 
-    log("Files downloaded.")
+    log("Downloading reference files...")
+    for file in REFERENCE_FILES:
+        url  = f"{REPO_BASE}/{file}"
+        dest = os.path.join(INSTALL_DIR, file.replace("/", os.sep))
+        log(f"  {file}")
+        try:
+            urllib.request.urlretrieve(url, dest)
+        except Exception as e:
+            fail(f"Failed to download {file}:\n{e}")
+
+    log("All files downloaded.")
 
 
 def install_dependencies(python_exe):
     log("Installing Python dependencies...")
-    for dep in DEPS:
-        log(f"  pip install {dep}")
+    for batch in DEPS:
+        log(f"  pip install {' '.join(batch)}")
         result = subprocess.run(
-            [python_exe, "-m", "pip", "install", dep, "--quiet"],
+            [python_exe, "-m", "pip", "install"] + batch + ["--quiet"],
             capture_output=True, text=True
         )
         if result.returncode != 0:
-            fail(f"Failed to install {dep}:\n{result.stderr}")
+            fail(f"Failed to install {batch}:\n{result.stderr}")
     log("Dependencies installed.")
 
 
@@ -178,7 +199,6 @@ def set_env_variables(api_url):
     winreg.SetValueEx(key, "ITDER_API_URL", 0, winreg.REG_SZ, api_url)
     winreg.SetValueEx(key, "PYTHONUTF8",    0, winreg.REG_SZ, "1")
     winreg.CloseKey(key)
-    # notify system of env change
     ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x1A, 0, "Environment", 0x0002, 5000, None)
     log(f"ITDER_API_URL = {api_url}")
     log("PYTHONUTF8 = 1")
@@ -205,18 +225,16 @@ def register_startup(python_exe):
 
 
 def main():
-    # auto-elevate — triggers UAC prompt on double-click, no right-click needed
+    # auto-elevate — triggers UAC prompt on double-click
     if not is_admin():
         ctypes.windll.shell32.ShellExecuteW(
             None, "runas", sys.executable, " ".join(f'"{a}"' for a in sys.argv), None, 1
         )
         sys.exit(0)
 
-    # init tkinter (hidden root)
     root = tk.Tk()
     root.withdraw()
 
-    # ask for API URL
     api_url = simpledialog.askstring(
         "ITDer Installer",
         "Enter the ITDer API URL:",

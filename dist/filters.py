@@ -133,3 +133,29 @@ def filter_startup_noise(events: list[dict]) -> list[dict]:
         out.append(ev)
 
     return out
+
+def filter_fake_sleep(events: list[dict]) -> list[dict]:
+    """
+    Drop SLEEP/WAKE pairs that are closer than SLEEP_WAKE_MIN_SEC apart.
+    These are fake sleep cycles from display timeout or USB power management,
+    not real user sleep. Both the SLEEP and its matching WAKE are dropped.
+    """
+    sorted_events = sorted(events, key=lambda x: x["timestamp"])
+    min_sec = config.SLEEP_WAKE_MIN_SEC
+
+    # Find indices of fake sleep/wake pairs to drop
+    drop = set()
+    pending_sleep_idx = None
+
+    for i, ev in enumerate(sorted_events):
+        activity = ev.get("activity", "")
+        if activity == "SLEEP":
+            pending_sleep_idx = i
+        elif activity == "WAKE" and pending_sleep_idx is not None:
+            diff = (ev["timestamp"] - sorted_events[pending_sleep_idx]["timestamp"]).total_seconds()
+            if diff < min_sec:
+                drop.add(pending_sleep_idx)
+                drop.add(i)
+            pending_sleep_idx = None
+
+    return [ev for i, ev in enumerate(sorted_events) if i not in drop]
