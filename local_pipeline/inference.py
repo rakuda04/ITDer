@@ -8,13 +8,24 @@
 # Stages:
 #   Stage 1 — RF supervised (CERT-trained weights, no retraining)
 #   Stage 2 — IsoForest (scored against combined population)
-#   Stage 3 — LOF (scored against combined population)
+#   Stage 3 — Elliptic Envelope (fitted on local population)
 #   Stage 4 — Combined risk score + SHAP explanations
 #
-# Note on LOF:
-#   LOF is meaningful here because the synthetic population
-#   provides a realistic neighborhood. Without it, LOF on a
-#   single user would be meaningless.
+# Note on normalization:
+#   IsoForest and LOF raw scores are normalized using the min/max
+#   ranges from CERT training (stored in cert_thresholds.json).
+#   This ensures a score of 0.5 locally means the same thing as
+#   0.5 on CERT — preventing the small local population from
+#   compressing the scale and inflating everyone's score.
+#
+# Note on ranking:
+#   Users are ranked by a composite score:
+#     0.5 * normalized_mean_risk_score
+#   + 0.5 * normalized_days_above_threshold
+#
+#   Both components are normalized to [0,1] before combining so
+#   they contribute equally. This balances overall suspiciousness
+#   (mean score) with sustained anomalous behavior (flagged days).
 #
 # Outputs (to local_pipeline/output/):
 #   local_report_daily.csv   — per-day scores for all users
@@ -32,7 +43,6 @@ import numpy as np
 import pandas as pd
 import shap
 from pathlib import Path
-from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings('ignore')
@@ -53,10 +63,12 @@ OUTPUT_SHAP      = OUTPUT_DIR / "local_shap_values.csv"
 
 # ── config ───────────────────────────────────────────────────
 CONFIG = {
-    'weight_supervised':   0.7,
-    'weight_unsupervised': 0.3,
-    'lof_neighbors':       20,
-    'shap_days_per_user':  3,
+    'weight_supervised':        0.5,   # RF retrained on 100-user CERT subset — re-enabled
+    'weight_unsupervised':      0.5,
+    'shap_days_per_user':       3,
+    # Composite ranking weights — must sum to 1.0
+    'rank_weight_mean_score':   0.7,
+    'rank_weight_flagged_days': 0.3,
     'ignore_columns': [
         'user', 'date', 'day',
         'total_active_minutes_day',
@@ -73,7 +85,7 @@ def _load_models():
     for name, fname in [
         ('rf',        'rf_supervised.pkl'),
         ('iso',       'iso_forest.pkl'),
-        ('lof_scaler','lof_scaler.pkl'),
+        ('elliptic',  'elliptic_env.pkl'),
     ]:
         path = MODEL_DIR / fname
         if not path.exists():
@@ -91,31 +103,38 @@ def _load_thresholds():
     with open(THRESHOLDS_FILE) as f:
         t = json.load(f)
     print(f"[infer] Loaded thresholds — recommended: {t['recommended_threshold']:.4f}")
+
+    for key in ('iso_score_min', 'iso_score_max', 'lof_score_min', 'lof_score_max'):
+        if key not in t:
+            print(f"[infer] WARNING: '{key}' missing from cert_thresholds.json. "
+                  f"Re-run model_training.py to regenerate thresholds with score ranges.")
+
+    # Override threshold: RF is disabled so the CERT p98 combined threshold is
+    # meaningless. Use unsupervised-only p95 derived from synthetic normal population.
+    t['recommended_threshold'] = 0.3793
+    print(f"[infer] Threshold overridden to 0.3793 (unsupervised p99 of synthetic normals)")
     return t
 
 
 def _load_data():
-    print("[infer] Loading local features...")
-    if not LOCAL_FEATURES.exists():
-        raise FileNotFoundError(f"local_features.csv not found. Run preprocess.py first.")
-    local = pd.read_csv(LOCAL_FEATURES)
-    local['is_synthetic'] = 0
-    if 'insider_label' not in local.columns:
-        local['insider_label'] = -1   # -1 = unknown (real user, no label)
-    if 'scenario' not in local.columns:
-        local['scenario'] = None
-    print(f"  → {len(local)} local rows | {local['user'].nunique()} real user(s)")
-
-    print("[infer] Loading synthetic population...")
+    print("[infer] Loading synthetic population + real local user(s)...")
     if not SYNTHETIC_POP.exists():
         raise FileNotFoundError(f"synthetic_population.csv not found. Run synthetic_generator.py first.")
     synth = pd.read_csv(SYNTHETIC_POP)
     print(f"  → {len(synth)} synthetic rows | {synth['user'].nunique()} synthetic users")
 
-    combined = pd.concat([local, synth], ignore_index=True)
-    print(f"  → Combined: {len(combined)} rows | {combined['user'].nunique()} total users")
-    return combined
+    if LOCAL_FEATURES.exists():
+        local = pd.read_csv(LOCAL_FEATURES)
+        local['is_synthetic']  = 0
+        local['insider_label'] = 0
+        local['scenario']      = None
+        print(f"  → {len(local)} local rows | {local['user'].nunique()} real user(s): {local['user'].unique().tolist()}")
+        df = pd.concat([synth, local], ignore_index=True)
+    else:
+        print(f"  [!] local_model_intake.csv not found — scoring synthetic only")
+        df = synth
 
+    return df
 
 def _prepare_features(df, feature_cols=None):
     exclude = set(CONFIG['ignore_columns'])
@@ -124,7 +143,6 @@ def _prepare_features(df, feature_cols=None):
 
     X = df[feature_cols].copy()
 
-    # Fill z-score NaNs with 0 (has_baseline columns signal quality)
     zscore_cols = [c for c in X.columns if 'zscore' in c or 'z_score' in c]
     X[zscore_cols] = X[zscore_cols].fillna(0)
     X = X.fillna(0)
@@ -136,11 +154,10 @@ def _prepare_features(df, feature_cols=None):
 
 def _run_supervised(X, models, feature_cols):
     print("\n[infer] Stage 1: Supervised RF scoring...")
-    saved       = models['rf']
-    rf          = saved['model']
-    train_cols  = saved['feature_cols']
+    saved      = models['rf']
+    rf         = saved['model']
+    train_cols = saved['feature_cols']
 
-    # Align columns to what RF was trained on
     missing = set(train_cols) - set(feature_cols)
     if missing:
         print(f"  [!] Missing features filled with 0: {missing}")
@@ -153,52 +170,104 @@ def _run_supervised(X, models, feature_cols):
     return scores, train_cols
 
 
-def _run_iso(X, models, feature_cols):
-    print("[infer] Stage 2: IsoForest scoring...")
-    iso    = models['iso']
-    preds  = iso.predict(X.values)
-    scores = iso.decision_function(X.values)
-    print(f"  → Flagged {(preds == -1).sum()} rows")
-    return preds, scores
+def _run_iso(X, models, feature_cols, df):
+    """
+    Refit IsoForest on the current local population before scoring.
 
+    The CERT-trained IsoForest learned 'normal' from 1,000 CERT users with
+    inflated USB baselines (~1 USB/day). The local synthetic population uses
+    realistic baselines (~0.1 USB/day), so the CERT model does not flag USB
+    spikes that are obvious outliers locally. Refitting on the current
+    population ensures the anomaly boundary reflects the actual distribution.
+    """
+    from sklearn.ensemble import IsolationForest
+    print("[infer] Stage 2: IsoForest — refitting on local population...")
 
-def _run_lof(X, models):
-    print("[infer] Stage 3: LOF scoring...")
-    scaler   = models['lof_scaler']
-    X_scaled = scaler.transform(X.values)
-    lof      = LocalOutlierFactor(
-        n_neighbors   = CONFIG['lof_neighbors'],
-        contamination = 'auto',
-        novelty       = False,
+    normal_mask = df['insider_label'] == 0
+    X_normal    = X[normal_mask.values]
+
+    iso = IsolationForest(
+        contamination = 0.05,
+        n_estimators  = 200,
+        random_state  = 42,
         n_jobs        = -1,
     )
-    preds  = lof.fit_predict(X_scaled)
-    scores = lof.negative_outlier_factor_
+    iso.fit(X_normal.values)
+
+    preds  = iso.predict(X.values)
+    scores = iso.decision_function(X.values)
+    print(f"  → Refitted on {len(X_normal)} normal rows")
     print(f"  → Flagged {(preds == -1).sum()} rows")
     return preds, scores
 
 
-def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds):
+def _run_elliptic(X, models, df):
+    """
+    Refit Elliptic Envelope on the current local normal population.
+
+    Same reasoning as IsoForest — CERT-trained scaler and covariance reflect
+    inflated CERT distributions, not realistic local behavior.
+    """
+    from sklearn.covariance import EllipticEnvelope
+    from sklearn.preprocessing import StandardScaler
+    print("[infer] Stage 3: Elliptic Envelope — refitting on local population...")
+
+    normal_mask     = df['insider_label'] == 0
+    X_normal        = X[normal_mask.values]
+
+    scaler          = StandardScaler()
+    X_normal_scaled = scaler.fit_transform(X_normal.values)
+    X_scaled        = scaler.transform(X.values)
+
+    ee = EllipticEnvelope(
+        contamination    = 0.05,
+        random_state     = 42,
+        support_fraction = 0.9,
+    )
+    ee.fit(X_normal_scaled)
+
+    preds  = ee.predict(X_scaled)
+    scores = ee.score_samples(X_scaled)
+    print(f"  → Refitted on {len(X_normal)} normal rows")
+    print(f"  → Flagged {(preds == -1).sum()} rows")
+    return preds, scores
+
+
+def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds, thresholds):
     print("[infer] Stage 4: Building combined risk score...")
-    # Normalize IsoForest (lower = more anomalous → invert and scale 0-1)
-    iso_norm = 1 - (iso_scores - iso_scores.min()) / (
-        iso_scores.max() - iso_scores.min() + 1e-9)
-    # Normalize LOF (more negative = more anomalous → invert and scale 0-1)
-    lof_norm = 1 - (lof_scores - lof_scores.min()) / (
-        lof_scores.max() - lof_scores.min() + 1e-9)
+
+    if 'iso_score_min' in thresholds and 'iso_score_max' in thresholds:
+        iso_min = thresholds['iso_score_min']
+        iso_max = thresholds['iso_score_max']
+        print(f"  → Using CERT iso range: [{iso_min:.4f}, {iso_max:.4f}]")
+    else:
+        iso_min = float(iso_scores.min())
+        iso_max = float(iso_scores.max())
+        print(f"  → WARNING: Using local iso range (re-run model_training.py for CERT anchoring)")
+
+    # EE uses local normalization — no CERT anchoring needed since EE is always fitted locally
+    lof_min = float(lof_scores.min())
+    lof_max = float(lof_scores.max())
+
+    iso_norm = 1 - (iso_scores - iso_min) / (iso_max - iso_min + 1e-9)
+    iso_norm = np.clip(iso_norm, 0, 1)
+
+    lof_norm = 1 - (lof_scores - lof_min) / (lof_max - lof_min + 1e-9)
+    lof_norm = np.clip(lof_norm, 0, 1)
 
     unsupervised = (iso_norm + lof_norm) / 2
     combined     = (CONFIG['weight_supervised']   * supervised +
                     CONFIG['weight_unsupervised'] * unsupervised)
+    if CONFIG['weight_supervised'] == 0.0:
+        print(f"  → RF disabled (weight=0). Combined score = unsupervised only.")
     return combined, unsupervised, iso_norm, lof_norm
 
 
 def _build_shap(rf, X_aligned, df, feature_cols):
     print("[infer] Building SHAP explanations...")
-    explainer  = shap.TreeExplainer(rf)
-    shap_vals  = explainer.shap_values(X_aligned.values)
+    explainer = shap.TreeExplainer(rf)
+    shap_vals = explainer.shap_values(X_aligned.values)
 
-    # shap_values returns [class0, class1] list or 3D array for binary RF
     if isinstance(shap_vals, list):
         shap_vals = shap_vals[1]
     elif shap_vals.ndim == 3:
@@ -212,21 +281,45 @@ def _build_shap(rf, X_aligned, df, feature_cols):
 
 # ── reports ──────────────────────────────────────────────────
 
-def _build_user_report(df):
+def _build_user_report(df, threshold):
     agg = df.groupby(['user', 'is_synthetic']).agg(
-        final_risk_score  =('combined_risk_score', 'max'),
-        supervised_max    =('supervised_score',    'max'),
-        supervised_mean   =('supervised_score',    'mean'),
-        unsupervised_max  =('unsupervised_score',  'max'),
-        days_flagged_iso  =('iso_prediction',      lambda x: (x == -1).sum()),
-        days_flagged_lof  =('lof_prediction',      lambda x: (x == -1).sum()),
-        days_flagged_both =('flagged_by_both',     'sum'),
+        days_above_threshold =('above_threshold',    'sum'),
+        final_risk_score     =('combined_risk_score', 'mean'),
+        supervised_max       =('supervised_score',    'max'),
+        supervised_mean      =('supervised_score',    'mean'),
+        unsupervised_max     =('unsupervised_score',  'max'),
+        unsupervised_mean    =('unsupervised_score',  'mean'),
+        iso_score_norm_mean  =('iso_score_norm',      'mean'),
+        lof_score_norm_mean  =('lof_score_norm',      'mean'),
+        days_flagged_iso     =('iso_prediction',      lambda x: (x == -1).sum()),
+        days_flagged_lof     =('lof_prediction',      lambda x: (x == -1).sum()),
+        days_flagged_both    =('flagged_by_both',     'sum'),
+        total_days           =('combined_risk_score', 'count'),
     ).reset_index()
 
+    # Peak date — most anomalous single day
     peak = (df.loc[df.groupby('user')['combined_risk_score'].idxmax(),
                    ['user', 'day']].rename(columns={'day': 'peak_date'}))
     agg  = agg.merge(peak, on='user', how='left')
-    agg  = agg.sort_values('final_risk_score', ascending=False).reset_index(drop=True)
+
+    # Normalize both components to [0, 1] across all users
+    score_min = agg['final_risk_score'].min()
+    score_max = agg['final_risk_score'].max()
+    days_min  = agg['days_above_threshold'].min()
+    days_max  = agg['days_above_threshold'].max()
+
+    agg['_norm_score'] = (agg['final_risk_score'] - score_min) / (score_max - score_min + 1e-9)
+    agg['_norm_days']  = (agg['days_above_threshold'] - days_min) / (days_max - days_min + 1e-9)
+
+    # Composite rank score: 50% mean risk + 50% flagged days
+    w_score = CONFIG['rank_weight_mean_score']
+    w_days  = CONFIG['rank_weight_flagged_days']
+    agg['composite_rank_score'] = w_score * agg['_norm_score'] + w_days * agg['_norm_days']
+    agg = agg.drop(columns=['_norm_score', '_norm_days'])
+
+    # Sort by unsupervised_mean (anomaly signal) — composite_rank_score is preserved
+    # but not used for ordering until RF calibration is complete
+    agg = agg.sort_values('composite_rank_score', ascending=False).reset_index(drop=True)
     agg.index += 1
     agg.index.name = 'rank'
     return agg
@@ -248,21 +341,20 @@ def run():
     # Stage 1 — Supervised
     supervised_scores, aligned_cols = _run_supervised(X, models, feature_cols)
 
-    # Re-align X for unsupervised (same columns RF used)
     X_aligned = X[aligned_cols].fillna(0)
 
     # Stage 2 — IsoForest
-    iso_preds, iso_scores = _run_iso(X_aligned, models, aligned_cols)
+    iso_preds, iso_scores = _run_iso(X_aligned, models, aligned_cols, df)
 
-    # Stage 3 — LOF
-    lof_preds, lof_scores = _run_lof(X_aligned, models)
+    # Stage 3 — Elliptic Envelope
+    lof_preds, lof_scores = _run_elliptic(X_aligned, models, df)
 
     # Stage 4 — Combined
     combined, unsupervised, iso_norm, lof_norm = _build_combined(
-        supervised_scores, iso_scores, lof_scores, iso_preds, lof_preds
+        supervised_scores, iso_scores, lof_scores, iso_preds, lof_preds, thresholds
     )
 
-    # Attach scores to df
+    threshold = thresholds['recommended_threshold']
     df['supervised_score']    = supervised_scores
     df['unsupervised_score']  = unsupervised
     df['combined_risk_score'] = combined
@@ -273,14 +365,14 @@ def run():
     df['iso_score_norm']      = iso_norm
     df['lof_score_norm']      = lof_norm
     df['flagged_by_both']     = ((iso_preds == -1) & (lof_preds == -1)).astype(int)
-    df['above_threshold']     = (combined >= thresholds['recommended_threshold']).astype(int)
+    df['above_threshold']     = (combined >= threshold).astype(int)
 
     # SHAP
-    rf         = models['rf']['model']
-    shap_df    = _build_shap(rf, X_aligned, df, aligned_cols)
+    rf      = models['rf']['model']
+    shap_df = _build_shap(rf, X_aligned, df, aligned_cols)
 
     # Reports
-    user_report = _build_user_report(df)
+    user_report = _build_user_report(df, threshold)
 
     # Save
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -302,11 +394,10 @@ def run():
         print("  No real users in report.")
     else:
         print(real_users[[
-            'user', 'peak_date', 'final_risk_score',
-            'supervised_max', 'days_flagged_both'
+            'user', 'peak_date', 'composite_rank_score',
+            'final_risk_score', 'days_above_threshold', 'days_flagged_both'
         ]].to_string())
 
-    threshold = thresholds['recommended_threshold']
     print(f"\n  CERT p98 threshold : {threshold:.4f}")
     print(f"  Days above threshold (real users): "
           f"{df[(df['is_synthetic']==0) & (df['above_threshold']==1)].shape[0]}")

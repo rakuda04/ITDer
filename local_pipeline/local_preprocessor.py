@@ -160,7 +160,7 @@ def _compute_sessions(df_security, cfg):
                 elif act in logoff_acts:
                     if session_open_ts is not None:
                         # Cap session end at midnight
-                        cap = min(ts, pd.Timestamp(next_day).tz_localize(ts.tzinfo) 
+                        cap = min(ts, pd.Timestamp(next_day).tz_localize(ts.tzinfo)
                                   if ts.tzinfo else pd.Timestamp(next_day))
                         # Handle tz-aware timestamps
                         if hasattr(ts, 'tzinfo') and ts.tzinfo is not None:
@@ -314,8 +314,8 @@ def build_pipeline(cfg):
     print(f"  → {len(df)} raw rows loaded")
 
     # ── process each source ──────────────────────────────────
-    logon_feat  = process_logon(df, cfg)
-    device_feat = process_device(df, cfg)
+    logon_feat   = process_logon(df, cfg)
+    device_feat  = process_device(df, cfg)
     browser_feat = process_browser(df, cfg)
 
     # ── merge ────────────────────────────────────────────────
@@ -328,6 +328,29 @@ def build_pipeline(cfg):
 
     final_df['date'] = pd.to_datetime(final_df['day'], format='%m/%d/%Y')
     final_df = final_df.sort_values(by=['user', 'date'])
+
+    # ── drop empty days ──────────────────────────────────────
+    # Days where no data was collected appear as empty shells after the
+    # outer merge — typically the Windows Security event log has rolled
+    # over and has no events for that period, but browser history from
+    # the same date range pulled in a row anchor via the merge.
+    # A day with no logon events, no USB events, and no browser activity
+    # is not a "normal" day — it is a missing day. Keeping it would
+    # inflate the day count and drag down mean-based aggregations.
+    # We define "empty" as: no logon data (after_hours_session_count is NaN)
+    # AND no USB activity (usb_count is NaN or 0)
+    # AND no browser activity (job_site_visits_flag is NaN or 0).
+    has_logon   = final_df['after_hours_session_count'].notna() & (final_df['after_hours_session_count'] > 0)
+    has_logon_z = final_df['logon_count_zscore'].notna()
+    has_usb     = final_df['usb_count'].notna() & (final_df['usb_count'] > 0)
+    has_browser = final_df['job_site_visits_flag'].notna() & (final_df['job_site_visits_flag'] > 0)
+
+    has_any_data = has_logon | has_logon_z | has_usb | has_browser
+    n_before = len(final_df)
+    final_df = final_df[has_any_data].copy()
+    n_dropped = n_before - len(final_df)
+    if n_dropped > 0:
+        print(f"  [!] Dropped {n_dropped} empty days with no collected data")
 
     # ── fill NaNs ────────────────────────────────────────────
     # Z-score and total_active_minutes_day columns keep NaN intentionally.
