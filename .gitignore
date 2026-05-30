@@ -1,4 +1,5 @@
 cert_thresholds.json
+!dist/reference/cert_thresholds.json
 cert_pipeline/dataset
 cert_pipeline/output
 !cert_pipeline/output/models/
