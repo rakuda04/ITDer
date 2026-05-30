@@ -1,17 +1,10 @@
 # ============================================================
-# send_to_server.py  —  Upload pipeline results to server
+# send_to_server.py  —  Upload preprocessed features to server
 #
-# Reads the 3 output CSVs and POSTs them to the ingest API.
-# No database credentials needed on the Windows device.
+# Reads local_model_intake.csv and POSTs to the ingest API.
+# Inference runs server-side — not on this device.
 #
-# Usage:
-#   python send_to_server.py
-#
-# Config:
-#   Set ITDER_API_URL to your Cloudflare Tunnel URL.
-#
-# Requires:
-#   pip install requests pandas
+# Requires: pip install requests pandas
 # ============================================================
 
 import os
@@ -25,37 +18,29 @@ import requests
 
 sys.dont_write_bytecode = True
 
-API_URL  = os.getenv("ITDER_API_URL", "https://your-tunnel.trycloudflare.com")
+API_URL  = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com")
 ENDPOINT = f"{API_URL.rstrip('/')}/ingest"
 
 SCRIPT_DIR   = Path(__file__).resolve().parent
-OUTPUT_DIR   = SCRIPT_DIR / "output"
-DAILY_CSV    = OUTPUT_DIR / "local_report_daily.csv"
-USERS_CSV    = OUTPUT_DIR / "local_report_users.csv"
-FEATURES_CSV = OUTPUT_DIR / "local_model_intake.csv"
+FEATURES_CSV = SCRIPT_DIR / "output" / "local_model_intake.csv"
 
 
 def run():
-    missing = [p for p in [DAILY_CSV, USERS_CSV, FEATURES_CSV] if not p.exists()]
-    if missing:
-        print(f"[server] Missing output files: {[str(p) for p in missing]}")
-        print("[server] Run the pipeline first.")
+    if not FEATURES_CSV.exists():
+        print(f"[server] Missing: {FEATURES_CSV}")
+        print("[server] Run local_preprocessor.py first.")
         sys.exit(1)
 
-    print("[server] Loading CSVs...")
-    features  = pd.read_csv(FEATURES_CSV).fillna("").to_dict(orient="records")
-    scores    = pd.read_csv(DAILY_CSV).fillna("").to_dict(orient="records")
-    user_risk = pd.read_csv(USERS_CSV).fillna("").to_dict(orient="records")
+    print("[server] Loading features...")
+    features = pd.read_csv(FEATURES_CSV).fillna("").to_dict(orient="records")
 
     payload = {
         "hostname":        socket.gethostname(),
         "windows_version": platform.version(),
         "features":        features,
-        "scores":          scores,
-        "user_risk":       user_risk,
     }
 
-    print(f"[server] Posting to {ENDPOINT}...")
+    print(f"[server] Posting {len(features)} rows to {ENDPOINT}...")
     try:
         resp = requests.post(ENDPOINT, json=payload, timeout=30)
         resp.raise_for_status()

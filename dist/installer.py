@@ -16,39 +16,20 @@ from tkinter import messagebox, simpledialog
 # ── config ───────────────────────────────────────────────────
 REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script/dist"
 INSTALL_DIR  = r"C:\ProgramData\itder"
-MODELS_DIR   = r"C:\ProgramData\itder\models"
-REF_DIR      = r"C:\ProgramData\itder\reference"
-
 FILES = [
     "config.py",
     "data_collector.py",
     "local_preprocessor.py",
-    "inference.py",
-    "synthetic_generator.py",
     "send_to_server.py",
     "collectors/browser_history.py",
     "collectors/windows_events.py",
     "processors/filters.py",
 ]
 
-MODEL_FILES = [
-    "models/elliptic_env.pkl",
-    "models/iso_forest.pkl",
-    "models/lof_scaler.pkl",
-    "models/rf_supervised.pkl",
-    "models/rf_supervised.pkl.cert_original",
-]
-
-REFERENCE_FILES = [
-    "reference/cert_baseline_stats.json",
-    "reference/model_intake_final.csv",
-    "reference/cert_thresholds.json",
-]
-
 # install order matters — numpy must be pinned before shap
 DEPS = [
     ["pandas", "requests", "pywin32", "scikit-learn"],
-    ["numpy", "shap"],
+    ["numpy<2", "shap"],
 ]
 # ─────────────────────────────────────────────────────────────
 
@@ -68,8 +49,6 @@ log("Pipeline started")
 scripts = [
     "data_collector.py",
     "local_preprocessor.py",
-    "synthetic_generator.py",
-    "inference.py",
     "send_to_server.py",
 ]
 for script in scripts:
@@ -131,8 +110,6 @@ def create_directories():
         os.path.join(INSTALL_DIR, "output"),
         os.path.join(INSTALL_DIR, "collectors"),
         os.path.join(INSTALL_DIR, "processors"),
-        MODELS_DIR,
-        REF_DIR,
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
