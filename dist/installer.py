@@ -29,7 +29,7 @@ FILES = [
 # install order matters — numpy must be pinned before shap
 DEPS = [
     ["pandas", "requests", "pywin32", "scikit-learn"],
-    ["numpy<2", "shap"],
+    ["numpy", "shap"],
 ]
 # ─────────────────────────────────────────────────────────────
 
