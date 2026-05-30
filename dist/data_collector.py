@@ -86,7 +86,7 @@ def _export(events: list[dict], filename: str) -> None:
                 if isinstance(row["timestamp"], datetime):
                     row["timestamp"] = row["timestamp"].strftime("%Y-%m-%d %H:%M:%S.%f%z")
                 writer.writerow(row)
-        print(f"[pipeline] ✅ Saved {len(events)} records → {filename}")
+        print(f"[pipeline] [OK] Saved {len(events)} records -> {filename}")
     except Exception as exc:
         print(f"[pipeline] Error saving CSV: {exc}")
 
