@@ -130,26 +130,6 @@ def download_files():
         init = os.path.join(INSTALL_DIR, subdir, "__init__.py")
         open(init, "w").close()
 
-    log("Downloading model files...")
-    for file in MODEL_FILES:
-        url  = f"{REPO_BASE}/{file}"
-        dest = os.path.join(INSTALL_DIR, file.replace("/", os.sep))
-        log(f"  {file}")
-        try:
-            urllib.request.urlretrieve(url, dest)
-        except Exception as e:
-            fail(f"Failed to download {file}:\n{e}")
-
-    log("Downloading reference files...")
-    for file in REFERENCE_FILES:
-        url  = f"{REPO_BASE}/{file}"
-        dest = os.path.join(INSTALL_DIR, file.replace("/", os.sep))
-        log(f"  {file}")
-        try:
-            urllib.request.urlretrieve(url, dest)
-        except Exception as e:
-            fail(f"Failed to download {file}:\n{e}")
-
     log("All files downloaded.")
 
 
