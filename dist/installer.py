@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 
 # ── config ───────────────────────────────────────────────────
-REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script/dist"
+REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script/dist/local"
 INSTALL_DIR  = r"C:\ProgramData\itder"
 FILES = [
     "config.py",

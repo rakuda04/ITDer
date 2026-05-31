@@ -21,7 +21,7 @@ import win32evtlog
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config
+import dist.local.config as config
 
 # ── XML namespace used by all Windows event XML ─────────────
 _NS = {'ns': 'http://schemas.microsoft.com/win/2004/08/events/event'}

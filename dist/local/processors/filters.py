@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config
+import dist.local.config as config
 
 _USB_PATTERN = re.compile(config.USB_DEVICE_PATTERN, re.IGNORECASE)
 _STARTUP_DEDUP_WINDOW = timedelta(seconds=config.STARTUP_DEDUP_WINDOW_SEC)
