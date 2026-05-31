@@ -353,4 +353,57 @@ def build_pipeline(cfg):
     if 'job_site_visits_flag' not in final_df.columns:
         final_df['job_site_visits_flag'] = 0
     if 'usb_count' not in final_df.columns:
-        final_df
+        final_df['usb_count'] = 0
+
+    final_df = final_df.set_index('date').sort_index()
+
+    # Compute rolling 7-day max per user for each signal separately,
+    # then combine — avoids apply() DataFrame/Series ambiguity entirely.
+    final_df['_job_roll'] = (
+        final_df.groupby('user')['job_site_visits_flag']
+        .transform(lambda x: x.rolling('7D').max())
+    )
+    final_df['_usb_roll'] = (
+        final_df.groupby('user')['usb_count']
+        .transform(lambda x: x.rolling('7D').max())
+    )
+    final_df['job_search_plus_usb_week'] = (
+        (final_df['_job_roll'] > 0) & (final_df['_usb_roll'] > 0)
+    ).astype(int)
+    final_df = final_df.drop(columns=['_job_roll', '_usb_roll'])
+
+    final_df = final_df.reset_index()
+
+    # ── enforce schema column order ──────────────────────────
+    schema_cols = [
+        'date', 'user', 'day',
+        'total_active_minutes_day',
+        'after_hours_session_count',
+        'weekend_session_flag',
+        'logon_count_zscore',
+        'logon_count_zscore_has_baseline',
+        'usb_count',
+        'usb_after_hours_flag',
+        'usb_on_weekend_flag',
+        'usb_device_diversity_monthly',
+        'usb_count_zscore',
+        'usb_count_zscore_has_baseline',
+        'job_site_visits_flag',
+        'job_search_plus_usb_week',
+    ]
+    for col in schema_cols:
+        if col not in final_df.columns:
+            print(f"  [!] Missing expected column '{col}' — filling with NaN")
+            final_df[col] = np.nan
+
+    final_df = final_df[schema_cols]
+
+    # ── save ─────────────────────────────────────────────────
+    output_path = cfg['output_file']
+    final_df.to_csv(output_path, index=False)
+    print(f"[local_preprocessor] Saved {final_df.shape} -> {output_path}")
+    return final_df
+
+
+if __name__ == "__main__":
+    build_pipeline(CONFIG)

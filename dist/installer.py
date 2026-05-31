@@ -143,6 +143,21 @@ def install_dependencies(python_exe):
         )
         if result.returncode != 0:
             fail(f"Failed to install {batch}:\n{result.stderr}")
+
+    # pywin32 requires a post-install step to register its DLLs —
+    # without this, win32evtlog and other modules raise ImportError
+    log("Running pywin32 post-install...")
+    scripts_dir = os.path.join(os.path.dirname(python_exe), "Scripts")
+    post_install = os.path.join(scripts_dir, "pywin32_postinstall.py")
+    result = subprocess.run(
+        [python_exe, post_install, "-install"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        log(f"Warning: pywin32 post-install failed: {result.stderr.strip()}")
+    else:
+        log("pywin32 post-install complete.")
+
     log("Dependencies installed.")
 
 
