@@ -5,39 +5,20 @@ Pulls daily_features from Postgres, runs synthetic generation
 and inference, then writes scores back to daily_scores and user_risk.
 
 Usage:
-    python inference_worker.py           # run once manually
-    python inference_worker.py --update  # re-download models/scripts from repo first
+    docker compose run --rm worker            # run once
+    docker compose run --rm worker --update   # re-download scripts/models from repo first
 
 Schedule (disabled by default):
-    Set ITDER_SCHEDULE=1 and ITDER_CRON="0 2 * * *" in environment
-    to enable APScheduler. Default cron runs daily at 02:00.
-
-Directory layout (relative to this file):
-    inference_worker.py
-    worker_files/
-        inference.py
-        synthetic_generator.py
-        cert_pipeline/output/
-            models/
-                rf_supervised.pkl
-                iso_forest.pkl
-                elliptic_env.pkl
-            cert_baseline_stats.json
-            cert_thresholds.json
-            model_intake_final.csv
-        output/                  ← temp files written here
-            synthetic_population.csv
-            local_model_intake.csv
+    Set ITDER_SCHEDULE=1 in environment to enable.
+    Set ITDER_CRON="0 2 * * *" to customize (default: daily at 02:00 UTC).
 """
 
 import os
 import sys
-import io
 import urllib.request
 import traceback
 import importlib.util
-import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -49,33 +30,30 @@ sys.dont_write_bytecode = True
 
 # ── config ───────────────────────────────────────────────────
 
-REPO_BASE   = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script"
-WORKER_DIR  = Path(__file__).resolve().parent / "worker_files"
-OUTPUT_DIR  = WORKER_DIR / "output"
+REPO_BASE  = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script"
+WORKER_DIR = Path(__file__).resolve().parent / "worker_files"
+OUTPUT_DIR = WORKER_DIR / "output"
 
-# Files to download from repo: (repo path, local path relative to WORKER_DIR)
 REPO_FILES = [
-    ("local_pipeline/inference.py",                              "inference.py"),
-    ("local_pipeline/synthetic_generator.py",                   "synthetic_generator.py"),
-    ("cert_pipeline/output/models/rf_supervised.pkl",           "cert_pipeline/output/models/rf_supervised.pkl"),
-    ("cert_pipeline/output/models/iso_forest.pkl",              "cert_pipeline/output/models/iso_forest.pkl"),
-    ("cert_pipeline/output/models/elliptic_env.pkl",            "cert_pipeline/output/models/elliptic_env.pkl"),
-    ("cert_pipeline/output/cert_baseline_stats.json",           "cert_pipeline/output/cert_baseline_stats.json"),
-    ("cert_pipeline/output/cert_thresholds.json",               "cert_pipeline/output/cert_thresholds.json"),
-    ("cert_pipeline/output/model_intake_final.csv",             "cert_pipeline/output/model_intake_final.csv"),
+    ("local_pipeline/inference.py",                   "inference.py"),
+    ("local_pipeline/synthetic_generator.py",         "synthetic_generator.py"),
+    ("cert_pipeline/output/models/rf_supervised.pkl", "cert_pipeline/output/models/rf_supervised.pkl"),
+    ("cert_pipeline/output/models/iso_forest.pkl",    "cert_pipeline/output/models/iso_forest.pkl"),
+    ("cert_pipeline/output/models/elliptic_env.pkl",  "cert_pipeline/output/models/elliptic_env.pkl"),
+    ("cert_pipeline/output/cert_baseline_stats.json", "cert_pipeline/output/cert_baseline_stats.json"),
+    ("cert_pipeline/output/cert_thresholds.json",     "cert_pipeline/output/cert_thresholds.json"),
+    ("cert_pipeline/output/model_intake_final.csv",   "cert_pipeline/output/model_intake_final.csv"),
 ]
 
-# Schedule config — off by default
-# Set ITDER_SCHEDULE=1 in environment to enable
 SCHEDULE_ENABLED = os.getenv("ITDER_SCHEDULE", "0") == "1"
-SCHEDULE_CRON    = os.getenv("ITDER_CRON", "0 2 * * *")  # default: daily at 02:00
+SCHEDULE_CRON    = os.getenv("ITDER_CRON", "0 2 * * *")
 
 DB_CONFIG = {
-    "host":     os.getenv("POSTGRES_HOST",     "postgres"),
-    "port":     int(os.getenv("POSTGRES_PORT", "5432")),
-    "dbname":   os.getenv("POSTGRES_DB",       "itder"),
-    "user":     os.getenv("POSTGRES_USER",     "itder_user"),
-    "password": os.getenv("POSTGRES_PASSWORD", ""),
+    "host":            os.getenv("POSTGRES_HOST",     "postgres"),
+    "port":            int(os.getenv("POSTGRES_PORT", "5432")),
+    "dbname":          os.getenv("POSTGRES_DB",       "itder"),
+    "user":            os.getenv("POSTGRES_USER",     "itder_user"),
+    "password":        os.getenv("POSTGRES_PASSWORD", ""),
     "connect_timeout": 10,
 }
 
@@ -91,10 +69,9 @@ def fail(msg):
     sys.exit(1)
 
 
-# ── setup ────────────────────────────────────────────────────
+# ── file downloader ───────────────────────────────────────────
 
 def download_files(force=False):
-    """Download inference scripts and model files from GitHub repo."""
     log("Checking worker files...")
     WORKER_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,7 +80,6 @@ def download_files(force=False):
         local_path = WORKER_DIR / local_rel
         if local_path.exists() and not force:
             continue
-
         local_path.parent.mkdir(parents=True, exist_ok=True)
         url = f"{REPO_BASE}/{repo_path}"
         log(f"  Downloading {repo_path}...")
@@ -115,62 +91,28 @@ def download_files(force=False):
     log("Worker files ready.")
 
 
-def _load_module(name, path):
-    """Dynamically load a Python module from a file path."""
-    spec   = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-# ── db ───────────────────────────────────────────────────────
+# ── db helpers ────────────────────────────────────────────────
 
 def _connect():
     return psycopg2.connect(**DB_CONFIG)
 
 
 def _safe_float(val):
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return None
-
+    try:    return float(val)
+    except: return None
 
 def _safe_int(val):
-    try:
-        return int(float(val))
-    except (TypeError, ValueError):
-        return None
-
+    try:    return int(float(val))
+    except: return None
 
 def _safe_date(val):
     if not val or str(val).strip() in ("", "NaT", "nan"):
         return None
-    try:
-        return pd.to_datetime(str(val)).date()
-    except Exception:
-        return None
-
-
-def _get_server_device_id(cur) -> str:
-    """Get or create a virtual 'itder-server' device for server-side runs."""
-    hostname = "itder-server"
-    cur.execute("SELECT device_id FROM devices WHERE hostname = %s", (hostname,))
-    row = cur.fetchone()
-    if row:
-        cur.execute("UPDATE devices SET last_seen_at = now() WHERE hostname = %s", (hostname,))
-        return str(row[0])
-    cur.execute("""
-        INSERT INTO devices (hostname, windows_version, enrolled_at, last_seen_at)
-        VALUES (%s, 'server', now(), now())
-        RETURNING device_id
-    """, (hostname,))
-    return str(cur.fetchone()[0])
+    try:    return pd.to_datetime(str(val)).date()
+    except: return None
 
 
 def _get_server_device(cur) -> str:
-    """Get or create a virtual device representing server-side inference."""
     hostname = "itder-server"
     cur.execute("SELECT device_id FROM devices WHERE hostname = %s", (hostname,))
     row = cur.fetchone()
@@ -179,21 +121,21 @@ def _get_server_device(cur) -> str:
         return str(row[0])
     cur.execute("""
         INSERT INTO devices (hostname, windows_version, enrolled_at, last_seen_at)
-        VALUES (%s, 'server', now(), now())
-        RETURNING device_id
+        VALUES (%s, 'server', now(), now()) RETURNING device_id
     """, (hostname,))
     return str(cur.fetchone()[0])
 
 
+# ── pull features ─────────────────────────────────────────────
+
 def pull_features() -> pd.DataFrame:
-    """Pull all daily_features from Postgres into a DataFrame."""
     log("Pulling daily_features from Postgres...")
     conn = _connect()
     try:
         df = pd.read_sql("""
             SELECT
-                username                    AS user,
-                feature_date                AS date,
+                username                        AS user,
+                feature_date                    AS date,
                 to_char(feature_date, 'MM/DD/YYYY') AS day,
                 total_active_minutes_day,
                 after_hours_session_count,
@@ -218,12 +160,11 @@ def pull_features() -> pd.DataFrame:
     return df
 
 
+# ── write scores ──────────────────────────────────────────────
+
 def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
-    """Write inference results back to Postgres."""
     log("Writing scores to Postgres...")
     conn = _connect()
-
-    # Use a single run_id for this worker execution
     run_id = None
     try:
         with conn:
@@ -232,32 +173,28 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
 
                 cur.execute("""
                     INSERT INTO pipeline_runs (device_id, started_at, status)
-                    VALUES (%s, now(), 'running')
-                    RETURNING run_id
+                    VALUES (%s, now(), 'running') RETURNING run_id
                 """, (device_id,))
                 run_id = cur.fetchone()[0]
 
-                # Write daily scores — real users only
+                # daily_scores — real users only
                 real = daily_df[daily_df['is_synthetic'] == 0].copy()
-                score_data = []
-                for _, r in real.iterrows():
-                    score_data.append((
-                        device_id, run_id,
-                        str(r.get('user')),
-                        _safe_date(r.get('date')),
-                        _safe_float(r.get('supervised_score')),
-                        _safe_float(r.get('unsupervised_score')),
-                        _safe_float(r.get('combined_risk_score')),
-                        _safe_int(r.get('iso_prediction')),
-                        _safe_float(r.get('iso_score')),
-                        _safe_float(r.get('iso_score_norm')),
-                        _safe_int(r.get('lof_prediction')),
-                        _safe_float(r.get('lof_score')),
-                        _safe_float(r.get('lof_score_norm')),
-                        _safe_int(r.get('flagged_by_both')),
-                        _safe_int(r.get('above_threshold')),
-                        0,  # is_synthetic
-                    ))
+                score_data = [(
+                    device_id, run_id,
+                    str(r['user']), _safe_date(r['date']),
+                    _safe_float(r.get('supervised_score')),
+                    _safe_float(r.get('unsupervised_score')),
+                    _safe_float(r.get('combined_risk_score')),
+                    _safe_int(r.get('iso_prediction')),
+                    _safe_float(r.get('iso_score')),
+                    _safe_float(r.get('iso_score_norm')),
+                    _safe_int(r.get('lof_prediction')),
+                    _safe_float(r.get('lof_score')),
+                    _safe_float(r.get('lof_score_norm')),
+                    _safe_int(r.get('flagged_by_both')),
+                    _safe_int(r.get('above_threshold')),
+                    0,
+                ) for _, r in real.iterrows()]
 
                 if score_data:
                     execute_values(cur, """
@@ -272,31 +209,27 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                     """, score_data)
                     log(f"  → {len(score_data)} rows written to daily_scores")
 
-                # Write user risk — real users only
-                real_users = user_report[user_report['is_synthetic'] == 0].copy()
-                real_users = real_users.reset_index()  # rank is the index
-                user_data = []
-                for _, r in real_users.iterrows():
-                    user_data.append((
-                        device_id, run_id,
-                        str(r.get('user')),
-                        _safe_int(r.get('rank')),
-                        0,  # is_synthetic
-                        _safe_int(r.get('days_above_threshold')),
-                        _safe_float(r.get('final_risk_score')),
-                        _safe_float(r.get('supervised_max')),
-                        _safe_float(r.get('supervised_mean')),
-                        _safe_float(r.get('unsupervised_max')),
-                        _safe_float(r.get('unsupervised_mean')),
-                        _safe_float(r.get('iso_score_norm_mean')),
-                        _safe_float(r.get('lof_score_norm_mean')),
-                        _safe_int(r.get('days_flagged_iso')),
-                        _safe_int(r.get('days_flagged_lof')),
-                        _safe_int(r.get('days_flagged_both')),
-                        _safe_int(r.get('total_days')),
-                        _safe_date(r.get('peak_date')),
-                        _safe_float(r.get('composite_rank_score')),
-                    ))
+                # user_risk — real users only
+                real_users = user_report[user_report['is_synthetic'] == 0].copy().reset_index()
+                user_data = [(
+                    device_id, run_id,
+                    str(r['user']),
+                    _safe_int(r.get('rank')), 0,
+                    _safe_int(r.get('days_above_threshold')),
+                    _safe_float(r.get('final_risk_score')),
+                    _safe_float(r.get('supervised_max')),
+                    _safe_float(r.get('supervised_mean')),
+                    _safe_float(r.get('unsupervised_max')),
+                    _safe_float(r.get('unsupervised_mean')),
+                    _safe_float(r.get('iso_score_norm_mean')),
+                    _safe_float(r.get('lof_score_norm_mean')),
+                    _safe_int(r.get('days_flagged_iso')),
+                    _safe_int(r.get('days_flagged_lof')),
+                    _safe_int(r.get('days_flagged_both')),
+                    _safe_int(r.get('total_days')),
+                    _safe_date(r.get('peak_date')),
+                    _safe_float(r.get('composite_rank_score')),
+                ) for _, r in real_users.iterrows()]
 
                 if user_data:
                     execute_values(cur, """
@@ -314,8 +247,7 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
 
                 cur.execute("""
                     UPDATE pipeline_runs
-                    SET finished_at = now(), status = 'success',
-                        events_inserted = %s
+                    SET finished_at = now(), status = 'success', events_inserted = %s
                     WHERE run_id = %s
                 """, (len(score_data) + len(user_data), run_id))
 
@@ -341,60 +273,54 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
 
 # ── inference ─────────────────────────────────────────────────
 
-def run_inference(features_df: pd.DataFrame):
-    """
-    Patch inference.py and synthetic_generator.py paths to point
-    at worker_files/, then run them against the DB-pulled features.
-    """
-    log("Loading inference modules...")
+def _load_module(name, path):
+    spec   = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
-    # Patch sys.path so inference.py can import relative modules
+
+def run_inference(features_df: pd.DataFrame):
+    log("Loading inference modules...")
     if str(WORKER_DIR) not in sys.path:
         sys.path.insert(0, str(WORKER_DIR))
 
-    synth_mod = _load_module("synthetic_generator",
-                              WORKER_DIR / "synthetic_generator.py")
-    infer_mod = _load_module("inference",
-                              WORKER_DIR / "inference.py")
+    synth_mod = _load_module("synthetic_generator", WORKER_DIR / "synthetic_generator.py")
+    infer_mod = _load_module("inference",           WORKER_DIR / "inference.py")
 
-    # ── patch paths in synthetic_generator ───────────────────
     synth_mod.CERT_INTAKE   = WORKER_DIR / "cert_pipeline/output/model_intake_final.csv"
     synth_mod.CERT_BASELINE = WORKER_DIR / "cert_pipeline/output/cert_baseline_stats.json"
     synth_mod.OUTPUT_PATH   = OUTPUT_DIR / "synthetic_population.csv"
 
-    # ── patch paths in inference ──────────────────────────────
-    infer_mod.OUTPUT_DIR       = OUTPUT_DIR
-    infer_mod.MODEL_DIR        = WORKER_DIR / "cert_pipeline/output/models"
-    infer_mod.THRESHOLDS_FILE  = WORKER_DIR / "cert_pipeline/output/cert_thresholds.json"
-    infer_mod.LOCAL_FEATURES   = OUTPUT_DIR / "local_model_intake.csv"
-    infer_mod.SYNTHETIC_POP    = OUTPUT_DIR / "synthetic_population.csv"
-    infer_mod.OUTPUT_DAILY     = OUTPUT_DIR / "local_report_daily.csv"
-    infer_mod.OUTPUT_USERS     = OUTPUT_DIR / "local_report_users.csv"
-    infer_mod.OUTPUT_SHAP      = OUTPUT_DIR / "local_shap_values.csv"
+    infer_mod.OUTPUT_DIR      = OUTPUT_DIR
+    infer_mod.MODEL_DIR       = WORKER_DIR / "cert_pipeline/output/models"
+    infer_mod.THRESHOLDS_FILE = WORKER_DIR / "cert_pipeline/output/cert_thresholds.json"
+    infer_mod.LOCAL_FEATURES  = OUTPUT_DIR / "local_model_intake.csv"
+    infer_mod.SYNTHETIC_POP   = OUTPUT_DIR / "synthetic_population.csv"
+    infer_mod.OUTPUT_DAILY    = OUTPUT_DIR / "local_report_daily.csv"
+    infer_mod.OUTPUT_USERS    = OUTPUT_DIR / "local_report_users.csv"
+    infer_mod.OUTPUT_SHAP     = OUTPUT_DIR / "local_shap_values.csv"
 
-    # ── write features to local_model_intake.csv ─────────────
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     features_df.to_csv(infer_mod.LOCAL_FEATURES, index=False)
     log(f"  → Wrote {len(features_df)} feature rows to local_model_intake.csv")
 
-    # ── run synthetic generator ───────────────────────────────
     log("Running synthetic_generator...")
     synth_mod.generate(OUTPUT_DIR / "synthetic_population.csv")
 
-    # ── run inference ─────────────────────────────────────────
     log("Running inference...")
     daily_df, user_report, shap_df = infer_mod.run()
 
     return daily_df, user_report, shap_df
 
 
-# ── main job ─────────────────────────────────────────────────
+# ── main job ──────────────────────────────────────────────────
 
 def run_job():
     log("=" * 50)
     log("Inference worker started")
     log("=" * 50)
-
     try:
         features_df              = pull_features()
         daily_df, user_report, _ = run_inference(features_df)
@@ -406,28 +332,18 @@ def run_job():
         sys.exit(1)
 
 
-# ── scheduler ────────────────────────────────────────────────
+# ── scheduler ─────────────────────────────────────────────────
 
 def start_scheduler():
-    try:
-        from apscheduler.schedulers.blocking import BlockingScheduler
-        from apscheduler.triggers.cron import CronTrigger
-    except ImportError:
-        fail("APScheduler not installed. Run: pip install apscheduler")
+    from apscheduler.schedulers.blocking import BlockingScheduler
+    from apscheduler.triggers.cron import CronTrigger
 
-    # Parse cron string: "min hour dom month dow"
     parts = SCHEDULE_CRON.split()
     if len(parts) != 5:
-        fail(f"Invalid ITDER_CRON format '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
+        fail(f"Invalid ITDER_CRON '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
 
-    trigger = CronTrigger(
-        minute      = parts[0],
-        hour        = parts[1],
-        day         = parts[2],
-        month       = parts[3],
-        day_of_week = parts[4],
-    )
-
+    trigger   = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
+                             month=parts[3], day_of_week=parts[4])
     scheduler = BlockingScheduler(timezone="UTC")
     scheduler.add_job(run_job, trigger)
 
@@ -441,11 +357,10 @@ def start_scheduler():
         log("Scheduler stopped.")
 
 
-# ── entry point ──────────────────────────────────────────────
+# ── entry point ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    update = "--update" in sys.argv
-    download_files(force=update)
+    download_files(force="--update" in sys.argv)
 
     if SCHEDULE_ENABLED:
         start_scheduler()

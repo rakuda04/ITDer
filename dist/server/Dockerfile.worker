@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    pandas \
+    numpy \
+    psycopg2-binary \
+    scikit-learn \
+    shap \
+    python-dateutil \
+    apscheduler
+
+COPY inference_worker.py .
+
+CMD ["python", "inference_worker.py", "--update"]
