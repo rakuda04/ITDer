@@ -80,35 +80,55 @@ def filter_usb_duplicates(events: list[dict]) -> list[dict]:
     return unique
 
 
+# SYSTEM account logon IDs — never real user activity
+_SYSTEM_LOGON_IDS = {"0x3e7", "0x3e4", "0x3e5", "0x3e3"}
+
 def filter_startup_noise(events: list[dict]) -> list[dict]:
     """
-    1. Keep only ONE STARTUP (6005) per boot — drops any dupes within
-       STARTUP_DEDUP_WINDOW_SEC (defensive; 6005 normally fires once).
-    2. Drop LOGON (4624) events that fire within STARTUP_DEDUP_WINDOW_SEC
-       of a STARTUP — those are service/session-manager logons, not the
-       interactive user logon.
+    1. Drop any LOGON with a SYSTEM account logon_id (0x3e7, 0x3e4, etc.)
+       — these are service/session-manager logons, never real user activity.
+    2. Keep only ONE STARTUP (6005) per boot.
+    3. Drop LOGON events within STARTUP_DEDUP_WINDOW_SEC before OR after
+       a STARTUP event.
 
     All other event types pass through untouched.
     """
     sorted_events = sorted(events, key=lambda x: x["timestamp"])
 
-    last_startup_ts = None
+    # Pass 1 — collect all STARTUP timestamps
+    startup_times = [
+        ev["timestamp"] for ev in sorted_events
+        if ev.get("activity") == "STARTUP"
+    ]
+
+    # Pass 2 — filter
+    seen_startups = set()
     out = []
 
     for ev in sorted_events:
         activity = ev.get("activity", "")
 
+        # Drop SYSTEM account logons entirely
+        if activity == "LOGON":
+            logon_id = str(ev.get("logon_id", "")).lower()
+            if logon_id in _SYSTEM_LOGON_IDS:
+                continue
+
         if activity == "STARTUP":
-            if (last_startup_ts is None
-                    or (ev["timestamp"] - last_startup_ts) > _STARTUP_DEDUP_WINDOW):
-                last_startup_ts = ev["timestamp"]
+            ts_key = ev["timestamp"].replace(microsecond=0)
+            if ts_key not in seen_startups:
+                seen_startups.add(ts_key)
                 out.append(ev)
-            # else: duplicate 6005 within same boot window → drop
             continue
 
-        if activity == "LOGON" and last_startup_ts is not None:
-            if (ev["timestamp"] - last_startup_ts) <= _STARTUP_DEDUP_WINDOW:
-                continue  # service/auto logon noise right after boot → drop
+        # Drop LOGONs within window of any startup (before OR after)
+        if activity == "LOGON":
+            near_startup = any(
+                abs((ev["timestamp"] - st).total_seconds()) <= _STARTUP_DEDUP_WINDOW.total_seconds()
+                for st in startup_times
+            )
+            if near_startup:
+                continue
 
         out.append(ev)
 

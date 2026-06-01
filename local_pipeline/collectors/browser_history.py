@@ -54,10 +54,12 @@ def _get_browser_paths() -> dict[str, list[Path]]:
         "Brave":   [local   / "BraveSoftware/Brave-Browser/User Data/Default/History"],
         "Opera":   [roaming / "Opera Software/Opera Stable/History"],
         "Vivaldi": [local   / "Vivaldi/User Data/Default/History"],
-        "Firefox": [
-            *(roaming / "Mozilla/Firefox/Profiles").glob("*.default*/places.sqlite"),
-            *(roaming / "Mozilla/Firefox/Profiles").glob("*.default-release*/places.sqlite"),
-        ],
+        "Firefox": list({
+            p for p in [
+                *(roaming / "Mozilla/Firefox/Profiles").glob("*.default-release*/places.sqlite"),
+                *(roaming / "Mozilla/Firefox/Profiles").glob("*.default/places.sqlite"),
+            ]
+        }),
     }
 
 
@@ -73,7 +75,7 @@ def _query_chromium(db_path: Path, browser_name: str, days: int) -> list[dict]:
             (datetime.now(timezone.utc) - datetime(1601, 1, 1, tzinfo=timezone.utc))
             .total_seconds() * 1_000_000
         )
-        cutoff_webkit = days * 86_400 * 1_000_000  # days → microseconds
+        cutoff_webkit = days * 86_400 * 1_000_000  # days -> microseconds
 
         conn = sqlite3.connect(tmp)
         cur  = conn.cursor()
@@ -156,7 +158,7 @@ def get_browser_history(days: int = config.DAYS_BACK) -> list[dict]:
                 continue
             print(f"[browser_history] Found {browser}: {db_path}")
             rows = _query_firefox(db_path, days) if browser == "Firefox" else _query_chromium(db_path, browser, days)
-            print(f"  → {len(rows)} entries")
+            print(f"  -> {len(rows)} entries")
             all_results.extend(rows)
 
     return sorted(all_results, key=lambda x: x["timestamp"])

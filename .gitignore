@@ -1,5 +1,8 @@
-cert_thresholds.json
+cert_pipeline/output/*
 cert_pipeline/dataset
-cert_pipeline/output
 !cert_pipeline/output/models/
+!cert_pipeline/output/models/*.pkl
+!cert_pipeline/output/cert_baseline_stats.json
+!cert_pipeline/output/cert_thresholds.json
+!cert_pipeline/output/model_intake_final.csv
 local_pipeline/output

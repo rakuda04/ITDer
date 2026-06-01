@@ -1,0 +1,19 @@
+{
+  "combined_risk_p99": 0.7939877506347532,
+  "combined_risk_p98": 0.781450132579046,
+  "combined_risk_p95": 0.7646853275233779,
+  "supervised_p98": 0.998911190395881,
+  "supervised_p95": 0.998877688277982,
+  "iso_score_p98": 0.0,
+  "iso_score_p95": 0.060496727636593195,
+  "lof_score_p98": -177.6004356572495,
+  "iso_score_min": -0.15745532040802013,
+  "iso_score_max": 0.2813641201052518,
+  "lof_score_min": -8082.895948315497,
+  "lof_score_max": -1.602502239848689,
+  "contamination_used": 0.02,
+  "training_rows": 330452,
+  "training_users": 1000,
+  "cert_version": "4.2",
+  "recommended_threshold": 0.781450132579046
+}
