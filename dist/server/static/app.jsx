@@ -230,8 +230,26 @@ function SettingsPanel({ onClose, onDone, dark }) {
   const [inferCfg, setInferCfg] = React.useState({
     threshold: 0.3793,
   });
-  const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
-  const [log, setLog]         = React.useState(null); // {ok, text}
+  const [running, setRunning]   = React.useState(null);
+  const [log, setLog]           = React.useState(null);
+  const [mode, setMode]         = React.useState('manual');   // 'manual' | 'scheduled'
+  const [schedHour, setSchedHour]   = React.useState(2);
+  const [schedMin, setSchedMin]     = React.useState(0);
+  const [schedSaving, setSchedSaving] = React.useState(false);
+
+  // Load current schedule on open
+  React.useEffect(() => {
+    fetch('/api/schedule')
+      .then(r => r.json())
+      .then(d => {
+        if (d.enabled) {
+          setMode('scheduled');
+          setSchedHour(d.hour ?? 2);
+          setSchedMin(d.minute ?? 0);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const run = async (endpoint, cfg) => {
     setRunning(endpoint);
@@ -251,7 +269,28 @@ function SettingsPanel({ onClose, onDone, dark }) {
     setRunning(null);
   };
 
+  const saveSchedule = async () => {
+    setSchedSaving(true);
+    setLog(null);
+    try {
+      const r = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: mode === 'scheduled',
+          hour: schedHour,
+          minute: schedMin,
+        }),
+      });
+      const d = await r.json();
+      setLog({ ok: d.ok, text: d.ok ? '✓ Schedule saved' : (d.error || 'Error saving schedule') });
+    } catch(e) {
+      setLog({ ok: false, text: String(e) });
+    }
+    setSchedSaving(false);
+  };
 
+  const padZ = (n) => String(n).padStart(2, '0');
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -261,6 +300,63 @@ function SettingsPanel({ onClose, onDone, dark }) {
           <button className="settings-close" onClick={onClose}>✕</button>
         </div>
 
+        {/* ── inference trigger mode ── */}
+        <div className="settings-section">
+          <div className="settings-section-title">Inference trigger</div>
+          <div className="settings-mode-toggle">
+            <button
+              className={`mode-btn${mode === 'manual' ? ' active' : ''}`}
+              onClick={() => setMode('manual')}
+            >Manual</button>
+            <button
+              className={`mode-btn${mode === 'scheduled' ? ' active' : ''}`}
+              onClick={() => setMode('scheduled')}
+            >Scheduled</button>
+          </div>
+
+          {mode === 'manual' && (
+            <div style={{ marginTop: 12 }}>
+              <div className="settings-row">
+                <label>Alert threshold</label>
+                <Stepper value={inferCfg.threshold} min={0.1} max={0.99} step={0.01}
+                  onChange={v => setInferCfg({ threshold: +v.toFixed(4) })} />
+              </div>
+              <div className="settings-note">p99 of synthetic normals = 0.3793</div>
+              <button className="settings-run" disabled={running === 'inference'}
+                onClick={() => run('inference', inferCfg)}>
+                {running === 'inference' ? 'Running…' : 'Run inference now'}
+              </button>
+            </div>
+          )}
+
+          {mode === 'scheduled' && (
+            <div style={{ marginTop: 12 }}>
+              <div className="settings-note" style={{ marginBottom: 10 }}>
+                Inference will run automatically at the specified time daily (UTC).
+                Manual run button is disabled while scheduled mode is active.
+              </div>
+              <div className="settings-row">
+                <label>Hour (UTC)</label>
+                <Stepper value={schedHour} min={0} max={23}
+                  onChange={v => setSchedHour(v)} />
+              </div>
+              <div className="settings-row">
+                <label>Minute</label>
+                <Stepper value={schedMin} min={0} max={59} step={5}
+                  onChange={v => setSchedMin(v)} />
+              </div>
+              <div className="settings-note">
+                Runs daily at {padZ(schedHour)}:{padZ(schedMin)} UTC
+              </div>
+              <button className="settings-run" disabled={schedSaving}
+                onClick={saveSchedule}>
+                {schedSaving ? 'Saving…' : 'Save schedule'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── synthetic population ── */}
         <div className="settings-section">
           <div className="settings-section-title">Synthetic population</div>
           <div className="settings-row">
@@ -296,20 +392,6 @@ function SettingsPanel({ onClose, onDone, dark }) {
           <button className="settings-run" disabled={running === 'synthetic'}
             onClick={() => run('synthetic', synthCfg)}>
             {running === 'synthetic' ? 'Running…' : 'Run synthetic generator'}
-          </button>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-section-title">Inference</div>
-          <div className="settings-row">
-            <label>Alert threshold</label>
-            <Stepper value={inferCfg.threshold} min={0.1} max={0.99} step={0.01}
-              onChange={v => setInferCfg({ threshold: +v.toFixed(4) })} />
-          </div>
-          <div className="settings-note">Unsupervised score above which a day is flagged as anomalous. p99 of synthetic normals = 0.3793.</div>
-          <button className="settings-run" disabled={running === 'inference'}
-            onClick={() => run('inference', inferCfg)}>
-            {running === 'inference' ? 'Running…' : 'Run inference'}
           </button>
         </div>
 

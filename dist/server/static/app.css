@@ -739,3 +739,32 @@ body {
   background: var(--bg-subtle); margin-top: 4px;
   border: 1px solid var(--border-soft);
 }
+/* ── settings mode toggle ────────────────────────────────────── */
+.settings-mode-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.mode-btn {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-subtle);
+  color: var(--text-3);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mode-btn:first-child { border-right: 1px solid var(--border); }
+.mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.mode-btn:hover:not(.active) {
+  background: var(--bg-hover);
+  color: var(--text);
+}

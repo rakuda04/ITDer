@@ -8,12 +8,11 @@ Run via Docker — see docker-compose.yml.
 
 import os
 import subprocess
-import traceback
 from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")

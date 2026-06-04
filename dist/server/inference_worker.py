@@ -30,7 +30,7 @@ sys.dont_write_bytecode = True
 
 # ── config ───────────────────────────────────────────────────
 
-REPO_BASE  = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script"
+REPO_BASE  = "https://raw.githubusercontent.com/rakuda04/ITDer/frontend-integration" #"https://raw.githubusercontent.com/rakuda04/ITDer/installation-script"
 WORKER_DIR = Path(__file__).resolve().parent / "worker_files"
 OUTPUT_DIR = WORKER_DIR / "output"
 
