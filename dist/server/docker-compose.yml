@@ -45,8 +45,8 @@ services:
         condition: service_healthy
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile.worker
+      context: ../..
+      dockerfile: dist/server/Dockerfile.worker
     container_name: itder_worker
     restart: unless-stopped   # stays alive for scheduler; set ITDER_SCHEDULE=1 to enable
     environment:

@@ -4,10 +4,6 @@ inference_worker.py  —  ITDer Server-Side Inference Worker
 Pulls daily_features from Postgres, runs synthetic generation
 and inference, then writes scores back to daily_scores and user_risk.
 
-Usage:
-    docker compose run --rm worker            # run once
-    docker compose run --rm worker --update   # re-download scripts/models from repo first
-
 Schedule (disabled by default):
     Set ITDER_SCHEDULE=1 in environment to enable.
     Set ITDER_CRON="0 2 * * *" to customize (default: daily at 02:00 UTC).
@@ -15,7 +11,6 @@ Schedule (disabled by default):
 
 import os
 import sys
-import urllib.request
 import traceback
 import importlib.util
 from datetime import datetime
@@ -30,20 +25,8 @@ sys.dont_write_bytecode = True
 
 # ── config ───────────────────────────────────────────────────
 
-REPO_BASE  = "https://raw.githubusercontent.com/rakuda04/ITDer/frontend-integration" #"https://raw.githubusercontent.com/rakuda04/ITDer/installation-script"
 WORKER_DIR = Path(__file__).resolve().parent / "worker_files"
 OUTPUT_DIR = WORKER_DIR / "output"
-
-REPO_FILES = [
-    ("local_pipeline/inference.py",                   "inference.py"),
-    ("local_pipeline/synthetic_generator.py",         "synthetic_generator.py"),
-    ("cert_pipeline/output/models/rf_supervised.pkl", "cert_pipeline/output/models/rf_supervised.pkl"),
-    ("cert_pipeline/output/models/iso_forest.pkl",    "cert_pipeline/output/models/iso_forest.pkl"),
-    ("cert_pipeline/output/models/elliptic_env.pkl",  "cert_pipeline/output/models/elliptic_env.pkl"),
-    ("cert_pipeline/output/cert_baseline_stats.json", "cert_pipeline/output/cert_baseline_stats.json"),
-    ("cert_pipeline/output/cert_thresholds.json",     "cert_pipeline/output/cert_thresholds.json"),
-    ("cert_pipeline/output/model_intake_final.csv",   "cert_pipeline/output/model_intake_final.csv"),
-]
 
 SCHEDULE_ENABLED = os.getenv("ITDER_SCHEDULE", "0") == "1"
 SCHEDULE_CRON    = os.getenv("ITDER_CRON", "0 2 * * *")
@@ -67,28 +50,6 @@ def log(msg):
 def fail(msg):
     log(f"FATAL: {msg}")
     sys.exit(1)
-
-
-# ── file downloader ───────────────────────────────────────────
-
-def download_files(force=False):
-    log("Checking worker files...")
-    WORKER_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    for repo_path, local_rel in REPO_FILES:
-        local_path = WORKER_DIR / local_rel
-        if local_path.exists() and not force:
-            continue
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        url = f"{REPO_BASE}/{repo_path}"
-        log(f"  Downloading {repo_path}...")
-        try:
-            urllib.request.urlretrieve(url, local_path)
-        except Exception as e:
-            fail(f"Failed to download {repo_path}: {e}")
-
-    log("Worker files ready.")
 
 
 # ── db helpers ────────────────────────────────────────────────
@@ -332,37 +293,54 @@ def run_job():
         sys.exit(1)
 
 
-# ── scheduler ─────────────────────────────────────────────────
+# ── http server ───────────────────────────────────────────────
 
-def start_scheduler():
-    from apscheduler.schedulers.blocking import BlockingScheduler
-    from apscheduler.triggers.cron import CronTrigger
+from flask import Flask as _Flask, jsonify as _jsonify
+import threading as _threading
 
-    parts = SCHEDULE_CRON.split()
-    if len(parts) != 5:
-        fail(f"Invalid ITDER_CRON '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
+_flask_app = _Flask(__name__)
+_run_lock  = _threading.Lock()
 
-    trigger   = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
-                             month=parts[3], day_of_week=parts[4])
-    scheduler = BlockingScheduler(timezone="UTC")
-    scheduler.add_job(run_job, trigger)
 
-    log(f"Scheduler enabled — cron: '{SCHEDULE_CRON}' (UTC)")
-    log("Running job now before starting schedule...")
-    run_job()
+@_flask_app.route("/run", methods=["POST"])
+def http_run():
+    if not _run_lock.acquire(blocking=False):
+        return _jsonify({"ok": False, "msg": "run already in progress"}), 429
+    def do_run():
+        try:
+            run_job()
+        finally:
+            _run_lock.release()
+    _threading.Thread(target=do_run, daemon=True).start()
+    return _jsonify({"ok": True, "msg": "inference started"})
 
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        log("Scheduler stopped.")
+
+@_flask_app.route("/health", methods=["GET"])
+def http_health():
+    return _jsonify({"status": "ok"})
 
 
 # ── entry point ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    download_files(force="--update" in sys.argv)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if SCHEDULE_ENABLED:
-        start_scheduler()
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        parts = SCHEDULE_CRON.split()
+        if len(parts) != 5:
+            fail(f"Invalid ITDER_CRON '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
+
+        trigger   = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
+                                 month=parts[3], day_of_week=parts[4])
+        scheduler = BackgroundScheduler(timezone="UTC")
+        scheduler.add_job(run_job, trigger)
+        scheduler.start()
+        log(f"Scheduler enabled — cron: '{SCHEDULE_CRON}' (UTC)")
     else:
-        run_job()
+        log("Scheduler disabled — manual trigger only via HTTP")
+
+    log("Worker HTTP server starting on port 8001")
+    _flask_app.run(host="0.0.0.0", port=8001, debug=False)

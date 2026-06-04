@@ -35,7 +35,7 @@ function applyTheme(dark) {
 }
 
 // ── data fetching ─────────────────────────────────────────────────────────────
-function useApi(url) {
+function useApi(url, refresh = 0) {
   const [data, setData]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -45,7 +45,7 @@ function useApi(url) {
       .then((r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); })
       .then((d) => { setData(d); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
-  }, [url]);
+  }, [url, refresh]);
   return { data, loading, error };
 }
 
@@ -405,9 +405,10 @@ function SettingsPanel({ onClose, onDone, dark }) {
 
 // ── main app ──────────────────────────────────────────────────────────────────
 function App() {
-  const { data: usersData, loading: uL, error: uE } = useApi("/api/users");
-  const { data: dailyAll,  loading: dL, error: dE } = useApi("/api/daily");
-  const { data: shapAll,   loading: sL, error: sE } = useApi("/api/shap");
+  const [refresh, setRefresh] = useState(0);
+  const { data: usersData, loading: uL, error: uE } = useApi("/api/users", refresh);
+  const { data: dailyAll,  loading: dL, error: dE } = useApi("/api/daily", refresh);
+  const { data: shapAll,   loading: sL, error: sE } = useApi("/api/shap",  refresh);
 
   const [sel, setSel]   = useState(null);
   const [tab, setTab]   = useState("overview");
@@ -415,10 +416,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => { applyTheme(dark); }, [dark]);
-  const reloadData = () => {
-    // Force re-fetch by reloading the page
-    window.location.reload();
-  };
+  const reloadData = () => setRefresh(r => r + 1);
   const toggleTheme = () => setDark((d) => !d);
 
   useEffect(() => {

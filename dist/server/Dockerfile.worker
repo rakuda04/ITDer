@@ -9,8 +9,20 @@ RUN pip install --no-cache-dir \
     scikit-learn \
     shap \
     python-dateutil \
-    apscheduler
+    apscheduler \
+    flask
 
-COPY inference_worker.py .
+# Copy worker script
+COPY dist/server/inference_worker.py .
 
-CMD ["python", "inference_worker.py", "--update"]
+# Bake in inference scripts and model files
+COPY local_pipeline/inference.py          ./worker_files/
+COPY local_pipeline/synthetic_generator.py ./worker_files/
+COPY cert_pipeline/output/models/          ./worker_files/cert_pipeline/output/models/
+COPY cert_pipeline/output/cert_baseline_stats.json ./worker_files/cert_pipeline/output/
+COPY cert_pipeline/output/cert_thresholds.json     ./worker_files/cert_pipeline/output/
+COPY cert_pipeline/output/model_intake_final.csv   ./worker_files/cert_pipeline/output/
+
+RUN mkdir -p ./worker_files/output
+
+CMD ["python", "inference_worker.py"]

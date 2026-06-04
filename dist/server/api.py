@@ -7,8 +7,8 @@ Run via Docker — see docker-compose.yml.
 """
 
 import os
-import subprocess
-from pathlib import Path
+import json
+import urllib.request
 
 import psycopg2
 import psycopg2.extras
@@ -27,7 +27,7 @@ DB_CONFIG = {
     "connect_timeout": 10,
 }
 
-WORKER_SCRIPT = Path(__file__).parent / "inference_worker.py"
+WORKER_URL = os.getenv("WORKER_URL", "http://worker:8001")
 
 
 def _connect():
@@ -187,17 +187,15 @@ def run_inference():
 
 def _trigger_worker():
     try:
-        result = subprocess.run(
-            ["python", str(WORKER_SCRIPT)],
-            capture_output=True, text=True, timeout=300
+        req = urllib.request.Request(
+            f"{WORKER_URL}/run",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST"
         )
-        ok = result.returncode == 0
-        return jsonify({
-            "ok": ok,
-            "output": result.stdout[-2000:] if ok else result.stderr[-2000:]
-        })
-    except subprocess.TimeoutExpired:
-        return jsonify({"ok": False, "output": "Worker timed out after 5 minutes"}), 500
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return jsonify({"ok": data.get("ok", True), "output": data.get("msg", "")})
     except Exception as e:
         return jsonify({"ok": False, "output": str(e)}), 500
 
