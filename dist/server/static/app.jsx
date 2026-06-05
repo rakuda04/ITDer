@@ -222,7 +222,7 @@ function Stepper({ value, onChange, min, max, step = 1 }) {
 }
 
 // ── settings panel ────────────────────────────────────────────────────────────
-function SettingsPanel({ onClose, onDone, dark }) {
+function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic }) {
   const [synthCfg, setSynthCfg] = React.useState({
     n_normal_users: 27, n_insider_users: 3, n_days: 90,
     normal_phase_days: 20, phased: true, random_scenarios: true,
@@ -356,6 +356,19 @@ function SettingsPanel({ onClose, onDone, dark }) {
           )}
         </div>
 
+        {/* ── show synthetic toggle ── */}
+        <div className="settings-section">
+          <div className="settings-section-title">Display</div>
+          <div className="settings-row">
+            <label>Show synthetic users</label>
+            <input type="checkbox" checked={showSynthetic}
+              onChange={onToggleSynthetic} />
+          </div>
+          <div className="settings-note">
+            Include synthetic background population in the leaderboard and charts.
+          </div>
+        </div>
+
         {/* ── synthetic population ── */}
         <div className="settings-section">
           <div className="settings-section-title">Synthetic population</div>
@@ -405,10 +418,12 @@ function SettingsPanel({ onClose, onDone, dark }) {
 
 // ── main app ──────────────────────────────────────────────────────────────────
 function App() {
-  const [refresh, setRefresh] = useState(0);
-  const { data: usersData, loading: uL, error: uE } = useApi("/api/users", refresh);
-  const { data: dailyAll,  loading: dL, error: dE } = useApi("/api/daily", refresh);
-  const { data: shapAll,   loading: sL, error: sE } = useApi("/api/shap",  refresh);
+  const [refresh, setRefresh]             = useState(0);
+  const [showSynthetic, setShowSynthetic] = useState(false);
+  const synthParam = showSynthetic ? "?include_synthetic=true" : "";
+  const { data: usersData, loading: uL, error: uE } = useApi(`/api/users${synthParam}`, refresh);
+  const { data: dailyAll,  loading: dL, error: dE } = useApi(`/api/daily${synthParam}`, refresh);
+  const { data: shapAll,   loading: sL, error: sE } = useApi("/api/shap",               refresh);
 
   const [sel, setSel]   = useState(null);
   const [tab, setTab]   = useState("overview");
@@ -732,6 +747,8 @@ function App() {
           onClose={() => setShowSettings(false)}
           onDone={() => { setShowSettings(false); reloadData(); }}
           dark={dark}
+          showSynthetic={showSynthetic}
+          onToggleSynthetic={() => setShowSynthetic(v => !v)}
         />
       )}
     </div>

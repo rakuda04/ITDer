@@ -53,8 +53,9 @@ def index():
 
 @app.route("/api/users")
 def users():
-    """Latest user risk per user — mirrors local_report_users.csv"""
-    rows = _query("""
+    include_synth = request.args.get("include_synthetic", "false").lower() == "true"
+    synth_filter  = "" if include_synth else "WHERE ur.is_synthetic = 0"
+    rows = _query(f"""
         SELECT DISTINCT ON (ur.username)
             ur.username                 AS user,
             ur.rank,
@@ -75,7 +76,7 @@ def users():
             ur.composite_rank_score
         FROM user_risk ur
         JOIN pipeline_runs pr ON pr.run_id = ur.run_id
-        WHERE ur.is_synthetic = 0
+        {synth_filter}
         ORDER BY ur.username, pr.started_at DESC
     """)
     # coerce types
@@ -98,8 +99,9 @@ def users():
 
 @app.route("/api/daily")
 def daily():
-    """All daily scores for real users — mirrors local_report_daily.csv"""
-    rows = _query("""
+    include_synth = request.args.get("include_synthetic", "false").lower() == "true"
+    synth_filter  = "" if include_synth else "WHERE ds.is_synthetic = 0"
+    rows = _query(f"""
         SELECT DISTINCT ON (ds.username, ds.score_date)
             ds.username                 AS user,
             ds.score_date               AS date,
@@ -132,7 +134,7 @@ def daily():
         LEFT JOIN daily_features df
             ON df.username = ds.username
             AND df.feature_date = ds.score_date
-        WHERE ds.is_synthetic = 0
+        {synth_filter}
         ORDER BY ds.username, ds.score_date, ds.run_id DESC
     """)
     int_cols   = ("after_hours_session_count","weekend_session_flag","is_synthetic",
@@ -157,10 +159,52 @@ def daily():
 
 @app.route("/api/shap")
 def shap():
-    """SHAP values — pulled from daily_features for now (no shap table yet)"""
-    # SHAP values aren't stored in DB yet — return empty so the tab
-    # shows "No SHAP data" gracefully rather than crashing
-    return jsonify([])
+    rows = _query("""
+        SELECT DISTINCT ON (sv.username, sv.score_date)
+            sv.username AS user,
+            sv.score_date AS date,
+            sv.after_hours_session_count,
+            sv.weekend_session_flag,
+            sv.logon_count_zscore,
+            sv.logon_count_zscore_has_baseline,
+            sv.usb_count,
+            sv.usb_after_hours_flag,
+            sv.usb_on_weekend_flag,
+            sv.usb_device_diversity_monthly,
+            sv.usb_count_zscore,
+            sv.job_site_visits_flag,
+            sv.job_search_plus_usb_week
+        FROM shap_values sv
+        ORDER BY sv.username, sv.score_date, sv.run_id DESC
+    """)
+    shap_cols = (
+        "after_hours_session_count", "weekend_session_flag", "logon_count_zscore",
+        "logon_count_zscore_has_baseline", "usb_count", "usb_after_hours_flag",
+        "usb_on_weekend_flag", "usb_device_diversity_monthly", "usb_count_zscore",
+        "job_site_visits_flag", "job_search_plus_usb_week",
+    )
+    for r in rows:
+        for c in shap_cols:
+            try:    r[c] = float(r[c]) if r[c] is not None else 0.0
+            except: r[c] = 0.0
+        if r.get("date"):
+            r["date"] = str(r["date"])
+    return jsonify(rows)
+
+
+@app.route("/api/schedule", methods=["GET"])
+def get_schedule():
+    return jsonify({
+        "enabled": os.getenv("ITDER_SCHEDULE", "0") == "1",
+        "cron":    os.getenv("ITDER_CRON", "0 2 * * *"),
+    })
+
+
+@app.route("/api/schedule", methods=["POST"])
+def set_schedule():
+    # Schedule is configured via env vars in docker-compose.yml
+    # This endpoint exists so the frontend doesn't 404
+    return jsonify({"ok": True, "msg": "Schedule is configured via ITDER_SCHEDULE and ITDER_CRON env vars"})
 
 
 @app.route("/api/status")

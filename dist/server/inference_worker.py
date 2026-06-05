@@ -123,7 +123,7 @@ def pull_features() -> pd.DataFrame:
 
 # ── write scores ──────────────────────────────────────────────
 
-def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
+def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.DataFrame):
     log("Writing scores to Postgres...")
     conn = _connect()
     run_id = None
@@ -138,8 +138,7 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                 """, (device_id,))
                 run_id = cur.fetchone()[0]
 
-                # daily_scores — real users only
-                real = daily_df[daily_df['is_synthetic'] == 0].copy()
+                # daily_scores — all users (real + synthetic)
                 score_data = [(
                     device_id, run_id,
                     str(r['user']), _safe_date(r['date']),
@@ -154,8 +153,8 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                     _safe_float(r.get('lof_score_norm')),
                     _safe_int(r.get('flagged_by_both')),
                     _safe_int(r.get('above_threshold')),
-                    0,
-                ) for _, r in real.iterrows()]
+                    _safe_int(r.get('is_synthetic')),
+                ) for _, r in daily_df.iterrows()]
 
                 if score_data:
                     execute_values(cur, """
@@ -168,14 +167,17 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                         ) VALUES %s
                         ON CONFLICT (device_id, username, score_date, run_id) DO NOTHING
                     """, score_data)
-                    log(f"  → {len(score_data)} rows written to daily_scores")
+                    real_count  = sum(1 for _, r in daily_df.iterrows() if not r.get('is_synthetic'))
+                    synth_count = len(score_data) - real_count
+                    log(f"  → {real_count} real + {synth_count} synthetic rows written to daily_scores")
 
-                # user_risk — real users only
-                real_users = user_report[user_report['is_synthetic'] == 0].copy().reset_index()
+                # user_risk — all users
+                all_users = user_report.copy().reset_index()
                 user_data = [(
                     device_id, run_id,
                     str(r['user']),
-                    _safe_int(r.get('rank')), 0,
+                    _safe_int(r.get('rank')),
+                    _safe_int(r.get('is_synthetic')),
                     _safe_int(r.get('days_above_threshold')),
                     _safe_float(r.get('final_risk_score')),
                     _safe_float(r.get('supervised_max')),
@@ -190,7 +192,7 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                     _safe_int(r.get('total_days')),
                     _safe_date(r.get('peak_date')),
                     _safe_float(r.get('composite_rank_score')),
-                ) for _, r in real_users.iterrows()]
+                ) for _, r in all_users.iterrows()]
 
                 if user_data:
                     execute_values(cur, """
@@ -205,6 +207,39 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                         ON CONFLICT (device_id, username, run_id) DO NOTHING
                     """, user_data)
                     log(f"  → {len(user_data)} rows written to user_risk")
+
+                # shap_values — real users only
+                if shap_df is not None and not shap_df.empty:
+                    real_shap = shap_df[shap_df['is_synthetic'] == 0].copy() if 'is_synthetic' in shap_df.columns else shap_df.copy()
+                    shap_data = [(
+                        device_id, run_id,
+                        str(r['user']), _safe_date(r.get('date')),
+                        _safe_float(r.get('after_hours_session_count')),
+                        _safe_float(r.get('weekend_session_flag')),
+                        _safe_float(r.get('logon_count_zscore')),
+                        _safe_float(r.get('logon_count_zscore_has_baseline')),
+                        _safe_float(r.get('usb_count')),
+                        _safe_float(r.get('usb_after_hours_flag')),
+                        _safe_float(r.get('usb_on_weekend_flag')),
+                        _safe_float(r.get('usb_device_diversity_monthly')),
+                        _safe_float(r.get('usb_count_zscore')),
+                        _safe_float(r.get('job_site_visits_flag')),
+                        _safe_float(r.get('job_search_plus_usb_week')),
+                    ) for _, r in real_shap.iterrows()]
+
+                    if shap_data:
+                        execute_values(cur, """
+                            INSERT INTO shap_values (
+                                device_id, run_id, username, score_date,
+                                after_hours_session_count, weekend_session_flag,
+                                logon_count_zscore, logon_count_zscore_has_baseline,
+                                usb_count, usb_after_hours_flag, usb_on_weekend_flag,
+                                usb_device_diversity_monthly, usb_count_zscore,
+                                job_site_visits_flag, job_search_plus_usb_week
+                            ) VALUES %s
+                            ON CONFLICT (device_id, username, score_date, run_id) DO NOTHING
+                        """, shap_data)
+                        log(f"  → {len(shap_data)} rows written to shap_values")
 
                 cur.execute("""
                     UPDATE pipeline_runs
@@ -283,9 +318,9 @@ def run_job():
     log("Inference worker started")
     log("=" * 50)
     try:
-        features_df              = pull_features()
-        daily_df, user_report, _ = run_inference(features_df)
-        write_scores(daily_df, user_report)
+        features_df                      = pull_features()
+        daily_df, user_report, shap_df   = run_inference(features_df)
+        write_scores(daily_df, user_report, shap_df)
         log("Worker finished successfully.")
     except Exception as e:
         log(f"Worker failed: {e}")
