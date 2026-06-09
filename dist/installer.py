@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 
 # ── config ───────────────────────────────────────────────────
-REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script/dist/local"
+REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/frontend-integration/dist/local"
 INSTALL_DIR  = r"C:\ProgramData\itder"
 FILES = [
     "config.py",
@@ -53,7 +53,7 @@ scripts = [
 ]
 for script in scripts:
     log(f"Running {{script}}...")
-    result = subprocess.run([sys.executable, script], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, script], capture_output=True, text=True, errors="replace")
     log(result.stdout)
     if result.returncode != 0:
         log(f"FAILED: {{script}}\\n{{result.stderr}}")
@@ -84,7 +84,7 @@ def check_python():
     py = shutil.which("python") or shutil.which("python3")
     if not py:
         fail("Python not found. Install Python 3.9+ from https://python.org and try again.")
-    result = subprocess.run([py, "--version"], capture_output=True, text=True)
+    result = subprocess.run([py, "--version"], capture_output=True, text=True, errors="replace")
     log(f"Found {result.stdout.strip()}")
     return py
 
@@ -97,7 +97,7 @@ def enable_audit_policies():
         ["wevtutil", "sl", "Microsoft-Windows-DriverFrameworks-UserMode/Operational", "/e:true"],
     ]
     for cmd in cmds:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         if result.returncode != 0:
             log(f"Warning: {' '.join(cmd)} returned {result.returncode}: {result.stderr.strip()}")
     log("Audit policies enabled.")
@@ -123,6 +123,20 @@ def download_files():
         log(f"  {file}")
         try:
             urllib.request.urlretrieve(url, dest)
+            
+            # --- AUTO-FIX IMPORTS ---
+            # Read the newly downloaded file
+            with open(dest, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # If the file contains the GitHub folder path in its imports, strip it out
+            if "dist.local." in content:
+                content = content.replace("dist.local.", "")
+                
+                # Write the corrected content back to the file
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    
         except Exception as e:
             fail(f"Failed to download {file}:\n{e}\n\nCheck your internet connection.")
 
@@ -130,7 +144,7 @@ def download_files():
         init = os.path.join(INSTALL_DIR, subdir, "__init__.py")
         open(init, "w").close()
 
-    log("All files downloaded.")
+    log("All files downloaded and imports patched.")
 
 
 def install_dependencies(python_exe):
@@ -139,19 +153,18 @@ def install_dependencies(python_exe):
         log(f"  pip install {' '.join(batch)}")
         result = subprocess.run(
             [python_exe, "-m", "pip", "install"] + batch + ["--quiet"],
-            capture_output=True, text=True
+            capture_output=True, text=True, errors="replace"
         )
         if result.returncode != 0:
             fail(f"Failed to install {batch}:\n{result.stderr}")
 
-    # pywin32 requires a post-install step to register its DLLs —
-    # without this, win32evtlog and other modules raise ImportError
+    # pywin32 requires a post-install step to register its DLLs
     log("Running pywin32 post-install...")
     scripts_dir = os.path.join(os.path.dirname(python_exe), "Scripts")
     post_install = os.path.join(scripts_dir, "pywin32_postinstall.py")
     result = subprocess.run(
         [python_exe, post_install, "-install"],
-        capture_output=True, text=True
+        capture_output=True, text=True, errors="replace"
     )
     if result.returncode != 0:
         log(f"Warning: pywin32 post-install failed: {result.stderr.strip()}")
@@ -210,10 +223,10 @@ def main():
     api_url = simpledialog.askstring(
         "ITDer Installer",
         "Enter the ITDer API URL:",
-        initialvalue="https://",
+        initialvalue="http://localhost:8000",
         parent=root
     )
-    if not api_url or api_url.strip() == "https://":
+    if not api_url or api_url.strip() in ["http://", "https://"]:
         messagebox.showwarning("ITDer Installer", "No API URL entered. Installation cancelled.")
         sys.exit(0)
 
