@@ -19,10 +19,10 @@ sys.dont_write_bytecode = True
 # Ensure project root is on the path when running directly
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import dist.local.config as config
-from dist.local.collectors.windows_events import get_umdf_events, get_security_events
-from dist.local.collectors.browser_history import get_browser_history
-from dist.local.processors.filters import filter_usb_only, filter_usb_duplicates, filter_startup_noise
+import config as config
+from collectors.windows_events import get_umdf_events, get_security_events
+from collectors.browser_history import get_browser_history
+from processors.filters import filter_usb_only, filter_usb_duplicates, filter_startup_noise
 
 
 # ── collection ───────────────────────────────────────────────
