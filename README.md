@@ -9,47 +9,56 @@
 ## How it works 
 ```mermaid
 graph TD
+    %% Collection Layer
     subgraph Collection Layer
-        A[Windows UMDF<br>USB Events] --> E
-        B[Security Logs<br>Logon/Lock] --> E
-        C[System Logs<br>Sleep/Wake] --> E
-        D[Browser History<br>SQLite] --> E
+        WE[collectors/windows_events.py] --> COL[data_collector.py]
+        BH[collectors/browser_history.py] --> COL
     end
 
+    %% Preprocessing Layer
     subgraph Preprocessing Layer
-        E[data_collector.py] --> F{Noise Filters}
-        F -->|Drop 60s Logon Noise| G[Clean Data]
-        F -->|Drop 1s Phantom USB| G
-        G --> H[(local_activity.csv)]
+        COL --> PRE[local_preprocessor.py]
+        PRE --> FILT[processors/filters.py<br>Drop Noise]
+        FILT --> FEAT[Feature Engineering]
+        FEAT --> CLEAN[(Clean Data)]
     end
 
+    %% ML Engine
     subgraph ML Inference Engine
-        H --> I[inference.py]
+        CLEAN --> INF[inference.py]
         
-        I -->|Stage 1| J(Supervised: Random Forest)
-        I -->|Stage 2| K(Unsupervised: Isolation Forest)
-        I -->|Stage 3| L(Unsupervised: Elliptic Envelope)
+        INF --> RF(Stage 1: Random Forest)
+        INF --> ISO(Stage 2: Isolation Forest)
+        INF --> EE(Stage 3: Elliptic Envelope)
 
-        J -.-> M{Risk Aggregation<br>& Composite Scoring}
-        K -.-> M
-        L -.-> M
+        RF --> AGG{Composite Scoring}
+        ISO --> AGG
+        EE --> AGG
 
-        M --> N[Stage 4: SHAP Explainability]
+        AGG --> SHAP[SHAP Explainability]
     end
 
-    subgraph Output & Reporting
-        N --> O[local_report_daily.csv]
-        N --> P[local_report_users.csv]
-        N --> Q[local_shap_values.csv]
+    %% Transmission Bridge
+    SHAP -->|POST Data| API[Server / ingest_api.py]
+
+    %% Frontend Dashboard
+    subgraph Frontend Dashboard app.jsx
+        API --> UI[React Dashboard]
+        
+        UI --> STATS[Key Risk Metrics<br>• User Rank<br>• Anomaly %<br>• Alert Counts]
+        UI --> VIZ[Interactive Visualizations<br>• Timeline Chart<br>• SHAP Chart]
     end
 
-    classDef default fill:#f9f9f9,stroke:#333,stroke-width:2px;
-    classDef engine fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
-    classDef storage fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    %% Layer-Specific Dark Mode Styling
+    classDef collection fill:#0d2a3f,stroke:#29b6f6,stroke-width:2px,color:#e1f5fe;
+    classDef preprocessing fill:#311b3b,stroke:#d05ce3,stroke-width:2px,color:#f8e1fd;
+    classDef ml fill:#3e2723,stroke:#ffa726,stroke-width:2px,color:#fff3e0;
+    classDef dashboard fill:#142e18,stroke:#66bb6a,stroke-width:2px,color:#e8f5e9;
     
-    class I,M,N engine;
-    class H,O,P,Q storage;
-
+    class WE,BH,COL collection;
+    class PRE,FILT,FEAT,CLEAN preprocessing;
+    class INF,RF,ISO,EE,AGG,SHAP ml;
+    class API,UI,STATS,VIZ dashboard;
 ```
 #  Setup & Installation
 
