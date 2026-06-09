@@ -55,6 +55,7 @@ If you don't have real log data, you can generate synthetic logs directly from t
 1. Open the dashboard at `http://127.0.0.1:5000`
 2. Navigate to the **Settings** panel
 3. Click **"Run synthetic generator"**
+4. Then click **"Run inference"**
 
 The dashboard will populate with simulated anomalies and activity data.
 
@@ -63,6 +64,7 @@ Alternatively, run the generator manually from the terminal:
 ```bash
 cd local_pipeline
 python synthetic_generator.py
+python inference.py
 ```
 
 ---

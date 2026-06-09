@@ -40,6 +40,13 @@
 import sys
 sys.dont_write_bytecode = True
 
+# Force UTF-8 output so Unicode characters (→, ✅, —) print correctly
+# on Windows, whose console defaults to cp1252.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import json
 import numpy as np
 import pandas as pd
