@@ -5,18 +5,22 @@ Serves CSV data from local_pipeline/output/ as JSON endpoints.
 """
 
 import os
+import sys
 import json
+import subprocess
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import csv
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 CORS(app)
 
-# Resolve output directory relative to this file
-BASE = Path(__file__).parent
-OUTPUT_DIR = BASE.parent / "local_pipeline" / "output"
+# Resolve paths relative to this file
+BASE           = Path(__file__).parent
+OUTPUT_DIR     = BASE.parent / "local_pipeline" / "output"
+SYNTHETIC_SCRIPT = BASE.parent / "local_pipeline" / "synthetic_generator.py"
+INFERENCE_SCRIPT = BASE.parent / "local_pipeline" / "inference.py"
 
 
 def read_csv(filename: str) -> list[dict]:
@@ -120,9 +124,75 @@ def status():
     files = {
         "local_report_users.csv": (OUTPUT_DIR / "local_report_users.csv").exists(),
         "local_report_daily.csv": (OUTPUT_DIR / "local_report_daily.csv").exists(),
-        "local_shap_values.csv": (OUTPUT_DIR / "local_shap_values.csv").exists(),
+        "local_shap_values.csv":  (OUTPUT_DIR / "local_shap_values.csv").exists(),
     }
     return jsonify({"output_dir": str(OUTPUT_DIR), "files": files})
+
+
+# ── run endpoints (these were missing — root cause of the bug) ────────────────
+
+@app.route("/api/run/synthetic", methods=["POST"])
+def run_synthetic():
+    """
+    Accepts synthetic-generator config from the dashboard Settings panel,
+    patches the relevant constants in synthetic_generator.py via env vars /
+    CLI args, then runs the script as a subprocess.
+    """
+    cfg = request.get_json(force=True) or {}
+
+    env = os.environ.copy()
+    # Pass config values the script reads (it uses module-level constants,
+    # so we override them via a small wrapper env block).
+    env["SYNTH_N_NORMAL_USERS"]    = str(int(cfg.get("n_normal_users",    27)))
+    env["SYNTH_N_INSIDER_USERS"]   = str(int(cfg.get("n_insider_users",    3)))
+    env["SYNTH_N_DAYS"]            = str(int(cfg.get("n_days",            90)))
+    env["SYNTH_NORMAL_PHASE_DAYS"] = str(int(cfg.get("normal_phase_days", 20)))
+    env["SYNTH_PHASED"]            = "1" if cfg.get("phased", True)            else "0"
+    env["SYNTH_RANDOM_SCENARIOS"]  = "1" if cfg.get("random_scenarios", True)  else "0"
+
+    if not SYNTHETIC_SCRIPT.exists():
+        return jsonify({"ok": False, "output": f"Script not found: {SYNTHETIC_SCRIPT}"}), 500
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SYNTHETIC_SCRIPT)],
+            capture_output=True, text=True, timeout=300, env=env,
+        )
+        output = (result.stdout + result.stderr).strip()
+        ok = result.returncode == 0
+        return jsonify({"ok": ok, "output": output})
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "output": "Timed out after 300 s"}), 500
+    except Exception as exc:
+        return jsonify({"ok": False, "output": str(exc)}), 500
+
+
+@app.route("/api/run/inference", methods=["POST"])
+def run_inference():
+    """
+    Accepts inference config from the dashboard Settings panel and runs
+    local_pipeline/inference.py as a subprocess.
+    """
+    cfg = request.get_json(force=True) or {}
+
+    env = os.environ.copy()
+    env["INFER_THRESHOLD"] = str(float(cfg.get("threshold", 0.3793)))
+
+    if not INFERENCE_SCRIPT.exists():
+        return jsonify({"ok": False, "output": f"Script not found: {INFERENCE_SCRIPT}"}), 500
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(INFERENCE_SCRIPT)],
+            capture_output=True, text=True, timeout=300, env=env,
+        )
+        output = (result.stdout + result.stderr).strip()
+        ok = result.returncode == 0
+        return jsonify({"ok": ok, "output": output})
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "output": "Timed out after 300 s"}), 500
+    except Exception as exc:
+        return jsonify({"ok": False, "output": str(exc)}), 500
 
 
 if __name__ == "__main__":
