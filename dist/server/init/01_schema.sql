@@ -137,6 +137,35 @@ CREATE INDEX IF NOT EXISTS user_risk_device_run  ON user_risk (device_id, run_id
 CREATE INDEX IF NOT EXISTS user_risk_risk_score  ON user_risk (final_risk_score DESC);
 
 -- -------------------------------------------------------------
+-- 6. shap_values
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS shap_values (
+    id                              BIGSERIAL   PRIMARY KEY,
+    device_id                       UUID        NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+    run_id                          BIGINT      REFERENCES pipeline_runs(run_id) ON DELETE SET NULL,
+    username                        TEXT        NOT NULL,
+    score_date                      DATE        NOT NULL,
+
+    after_hours_session_count       REAL,
+    weekend_session_flag            REAL,
+    logon_count_zscore              REAL,
+    logon_count_zscore_has_baseline REAL,
+    usb_count                       REAL,
+    usb_after_hours_flag            REAL,
+    usb_on_weekend_flag             REAL,
+    usb_device_diversity_monthly    REAL,
+    usb_count_zscore                REAL,
+    job_site_visits_flag            REAL,
+    job_search_plus_usb_week        REAL,
+
+    inserted_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (device_id, username, score_date, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS shap_values_username ON shap_values (username, score_date DESC);
+
+-- -------------------------------------------------------------
 -- 6. View — latest risk per user across all devices
 -- -------------------------------------------------------------
 CREATE OR REPLACE VIEW v_latest_user_risk AS

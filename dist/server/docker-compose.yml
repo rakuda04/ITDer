@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword} 
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d
@@ -15,17 +15,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: itder_pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@itder.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
     ports:
       - "5050:80"
     depends_on:
       - postgres
+
   api:
     build:
       context: .
@@ -37,26 +39,45 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+
   worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
     container_name: itder_worker
-    restart: "no"          # manual trigger only — set to unless-stopped to keep running for scheduler
+    restart: unless-stopped
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      ITDER_SCHEDULE: "0"  # set to "1" to enable scheduled runs
-      ITDER_CRON: "0 2 * * *"  # daily at 02:00 UTC (only used if ITDER_SCHEDULE=1)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+      ITDER_SCHEDULE: "0"  
+      ITDER_CRON: "0 2 * * *"  
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: itder_dashboard
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: itder
+      POSTGRES_USER: itder_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+    ports:
+      - "5001:5000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,9 +88,10 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
       - api
-
+    profiles:
+      - tunnel  
 volumes:
   postgres_data:

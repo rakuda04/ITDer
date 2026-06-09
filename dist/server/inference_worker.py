@@ -4,10 +4,6 @@ inference_worker.py  —  ITDer Server-Side Inference Worker
 Pulls daily_features from Postgres, runs synthetic generation
 and inference, then writes scores back to daily_scores and user_risk.
 
-Usage:
-    docker compose run --rm worker            # run once
-    docker compose run --rm worker --update   # re-download scripts/models from repo first
-
 Schedule (disabled by default):
     Set ITDER_SCHEDULE=1 in environment to enable.
     Set ITDER_CRON="0 2 * * *" to customize (default: daily at 02:00 UTC).
@@ -15,7 +11,6 @@ Schedule (disabled by default):
 
 import os
 import sys
-import urllib.request
 import traceback
 import importlib.util
 from datetime import datetime
@@ -30,20 +25,8 @@ sys.dont_write_bytecode = True
 
 # ── config ───────────────────────────────────────────────────
 
-REPO_BASE  = "https://raw.githubusercontent.com/rakuda04/ITDer/installation-script"
 WORKER_DIR = Path(__file__).resolve().parent / "worker_files"
 OUTPUT_DIR = WORKER_DIR / "output"
-
-REPO_FILES = [
-    ("local_pipeline/inference.py",                   "inference.py"),
-    ("local_pipeline/synthetic_generator.py",         "synthetic_generator.py"),
-    ("cert_pipeline/output/models/rf_supervised.pkl", "cert_pipeline/output/models/rf_supervised.pkl"),
-    ("cert_pipeline/output/models/iso_forest.pkl",    "cert_pipeline/output/models/iso_forest.pkl"),
-    ("cert_pipeline/output/models/elliptic_env.pkl",  "cert_pipeline/output/models/elliptic_env.pkl"),
-    ("cert_pipeline/output/cert_baseline_stats.json", "cert_pipeline/output/cert_baseline_stats.json"),
-    ("cert_pipeline/output/cert_thresholds.json",     "cert_pipeline/output/cert_thresholds.json"),
-    ("cert_pipeline/output/model_intake_final.csv",   "cert_pipeline/output/model_intake_final.csv"),
-]
 
 SCHEDULE_ENABLED = os.getenv("ITDER_SCHEDULE", "0") == "1"
 SCHEDULE_CRON    = os.getenv("ITDER_CRON", "0 2 * * *")
@@ -67,28 +50,6 @@ def log(msg):
 def fail(msg):
     log(f"FATAL: {msg}")
     sys.exit(1)
-
-
-# ── file downloader ───────────────────────────────────────────
-
-def download_files(force=False):
-    log("Checking worker files...")
-    WORKER_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    for repo_path, local_rel in REPO_FILES:
-        local_path = WORKER_DIR / local_rel
-        if local_path.exists() and not force:
-            continue
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        url = f"{REPO_BASE}/{repo_path}"
-        log(f"  Downloading {repo_path}...")
-        try:
-            urllib.request.urlretrieve(url, local_path)
-        except Exception as e:
-            fail(f"Failed to download {repo_path}: {e}")
-
-    log("Worker files ready.")
 
 
 # ── db helpers ────────────────────────────────────────────────
@@ -162,7 +123,7 @@ def pull_features() -> pd.DataFrame:
 
 # ── write scores ──────────────────────────────────────────────
 
-def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
+def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.DataFrame):
     log("Writing scores to Postgres...")
     conn = _connect()
     run_id = None
@@ -177,8 +138,7 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                 """, (device_id,))
                 run_id = cur.fetchone()[0]
 
-                # daily_scores — real users only
-                real = daily_df[daily_df['is_synthetic'] == 0].copy()
+                # daily_scores — all users (real + synthetic)
                 score_data = [(
                     device_id, run_id,
                     str(r['user']), _safe_date(r['date']),
@@ -193,8 +153,8 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                     _safe_float(r.get('lof_score_norm')),
                     _safe_int(r.get('flagged_by_both')),
                     _safe_int(r.get('above_threshold')),
-                    0,
-                ) for _, r in real.iterrows()]
+                    _safe_int(r.get('is_synthetic')),
+                ) for _, r in daily_df.iterrows()]
 
                 if score_data:
                     execute_values(cur, """
@@ -207,14 +167,17 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                         ) VALUES %s
                         ON CONFLICT (device_id, username, score_date, run_id) DO NOTHING
                     """, score_data)
-                    log(f"  → {len(score_data)} rows written to daily_scores")
+                    real_count  = sum(1 for _, r in daily_df.iterrows() if not r.get('is_synthetic'))
+                    synth_count = len(score_data) - real_count
+                    log(f"  → {real_count} real + {synth_count} synthetic rows written to daily_scores")
 
-                # user_risk — real users only
-                real_users = user_report[user_report['is_synthetic'] == 0].copy().reset_index()
+                # user_risk — all users
+                all_users = user_report.copy().reset_index()
                 user_data = [(
                     device_id, run_id,
                     str(r['user']),
-                    _safe_int(r.get('rank')), 0,
+                    _safe_int(r.get('rank')),
+                    _safe_int(r.get('is_synthetic')),
                     _safe_int(r.get('days_above_threshold')),
                     _safe_float(r.get('final_risk_score')),
                     _safe_float(r.get('supervised_max')),
@@ -229,7 +192,7 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                     _safe_int(r.get('total_days')),
                     _safe_date(r.get('peak_date')),
                     _safe_float(r.get('composite_rank_score')),
-                ) for _, r in real_users.iterrows()]
+                ) for _, r in all_users.iterrows()]
 
                 if user_data:
                     execute_values(cur, """
@@ -244,6 +207,39 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame):
                         ON CONFLICT (device_id, username, run_id) DO NOTHING
                     """, user_data)
                     log(f"  → {len(user_data)} rows written to user_risk")
+
+                # shap_values — real users only
+                if shap_df is not None and not shap_df.empty:
+                    real_shap = shap_df[shap_df['is_synthetic'] == 0].copy() if 'is_synthetic' in shap_df.columns else shap_df.copy()
+                    shap_data = [(
+                        device_id, run_id,
+                        str(r['user']), _safe_date(r.get('date')),
+                        _safe_float(r.get('after_hours_session_count')),
+                        _safe_float(r.get('weekend_session_flag')),
+                        _safe_float(r.get('logon_count_zscore')),
+                        _safe_float(r.get('logon_count_zscore_has_baseline')),
+                        _safe_float(r.get('usb_count')),
+                        _safe_float(r.get('usb_after_hours_flag')),
+                        _safe_float(r.get('usb_on_weekend_flag')),
+                        _safe_float(r.get('usb_device_diversity_monthly')),
+                        _safe_float(r.get('usb_count_zscore')),
+                        _safe_float(r.get('job_site_visits_flag')),
+                        _safe_float(r.get('job_search_plus_usb_week')),
+                    ) for _, r in real_shap.iterrows()]
+
+                    if shap_data:
+                        execute_values(cur, """
+                            INSERT INTO shap_values (
+                                device_id, run_id, username, score_date,
+                                after_hours_session_count, weekend_session_flag,
+                                logon_count_zscore, logon_count_zscore_has_baseline,
+                                usb_count, usb_after_hours_flag, usb_on_weekend_flag,
+                                usb_device_diversity_monthly, usb_count_zscore,
+                                job_site_visits_flag, job_search_plus_usb_week
+                            ) VALUES %s
+                            ON CONFLICT (device_id, username, score_date, run_id) DO NOTHING
+                        """, shap_data)
+                        log(f"  → {len(shap_data)} rows written to shap_values")
 
                 cur.execute("""
                     UPDATE pipeline_runs
@@ -322,9 +318,9 @@ def run_job():
     log("Inference worker started")
     log("=" * 50)
     try:
-        features_df              = pull_features()
-        daily_df, user_report, _ = run_inference(features_df)
-        write_scores(daily_df, user_report)
+        features_df                      = pull_features()
+        daily_df, user_report, shap_df   = run_inference(features_df)
+        write_scores(daily_df, user_report, shap_df)
         log("Worker finished successfully.")
     except Exception as e:
         log(f"Worker failed: {e}")
@@ -332,37 +328,54 @@ def run_job():
         sys.exit(1)
 
 
-# ── scheduler ─────────────────────────────────────────────────
+# ── http server ───────────────────────────────────────────────
 
-def start_scheduler():
-    from apscheduler.schedulers.blocking import BlockingScheduler
-    from apscheduler.triggers.cron import CronTrigger
+from flask import Flask as _Flask, jsonify as _jsonify
+import threading as _threading
 
-    parts = SCHEDULE_CRON.split()
-    if len(parts) != 5:
-        fail(f"Invalid ITDER_CRON '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
+_flask_app = _Flask(__name__)
+_run_lock  = _threading.Lock()
 
-    trigger   = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
-                             month=parts[3], day_of_week=parts[4])
-    scheduler = BlockingScheduler(timezone="UTC")
-    scheduler.add_job(run_job, trigger)
 
-    log(f"Scheduler enabled — cron: '{SCHEDULE_CRON}' (UTC)")
-    log("Running job now before starting schedule...")
-    run_job()
+@_flask_app.route("/run", methods=["POST"])
+def http_run():
+    if not _run_lock.acquire(blocking=False):
+        return _jsonify({"ok": False, "msg": "run already in progress"}), 429
+    def do_run():
+        try:
+            run_job()
+        finally:
+            _run_lock.release()
+    _threading.Thread(target=do_run, daemon=True).start()
+    return _jsonify({"ok": True, "msg": "inference started"})
 
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        log("Scheduler stopped.")
+
+@_flask_app.route("/health", methods=["GET"])
+def http_health():
+    return _jsonify({"status": "ok"})
 
 
 # ── entry point ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    download_files(force="--update" in sys.argv)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if SCHEDULE_ENABLED:
-        start_scheduler()
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        parts = SCHEDULE_CRON.split()
+        if len(parts) != 5:
+            fail(f"Invalid ITDER_CRON '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
+
+        trigger   = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
+                                 month=parts[3], day_of_week=parts[4])
+        scheduler = BackgroundScheduler(timezone="UTC")
+        scheduler.add_job(run_job, trigger)
+        scheduler.start()
+        log(f"Scheduler enabled — cron: '{SCHEDULE_CRON}' (UTC)")
     else:
-        run_job()
+        log("Scheduler disabled — manual trigger only via HTTP")
+
+    log("Worker HTTP server starting on port 8001")
+    _flask_app.run(host="0.0.0.0", port=8001, debug=False)
