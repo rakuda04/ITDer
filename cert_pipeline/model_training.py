@@ -76,7 +76,7 @@ CONFIG = {
 
     # Unsupervised settings
     'contamination'    : 0.02,
-    'lof_neighbors'    : 20,
+    'ee_neighbors'    : 20,
 
     # Supervised settings
     'cv_folds'         : 5,       # stratified k-fold
@@ -328,7 +328,7 @@ def run_supervised(X, df, feature_cols):
 
 
 # =============================================================================
-# 3. UNSUPERVISED — ISOFOREST + LOF
+# 3. UNSUPERVISED — ISOFOREST + EE
 # =============================================================================
 
 def run_isolation_forest(X):
@@ -389,8 +389,8 @@ def run_unsupervised(X, df):
     # Train EE on normal rows only so it learns what normal looks like
     normal_mask = df["insider_label"] == 0
     X_normal    = X[normal_mask.values]
-    lof_preds, lof_scores = run_elliptic(X, X_normal)
-    return iso_model, iso_preds, iso_scores, lof_preds, lof_scores
+    ee_preds, ee_scores = run_elliptic(X, X_normal)
+    return iso_model, iso_preds, iso_scores, ee_preds, ee_scores
 
 
 # =============================================================================
@@ -405,13 +405,13 @@ def normalize_scores(scores, invert=True):
     return 1 - norm if invert else norm
 
 
-def build_combined_score(supervised_scores, iso_scores, lof_scores,
-                         iso_preds, lof_preds):
+def build_combined_score(supervised_scores, iso_scores, ee_scores,
+                         iso_preds, ee_preds):
     """
-    Merges supervised (RF probability) + unsupervised (IsoForest+LOF)
+    Merges supervised (RF probability) + unsupervised (IsoForest+EE)
     into a single [0,1] risk score with equal weighting.
 
-    Unsupervised consensus bonus: +15% when both IsoForest AND LOF
+    Unsupervised consensus bonus: +15% when both IsoForest AND EE
     flag the same row — agreement between two different detection
     methods is a stronger signal than either alone.
     """
@@ -420,10 +420,10 @@ def build_combined_score(supervised_scores, iso_scores, lof_scores,
     print("="*60)
 
     iso_norm = normalize_scores(iso_scores, invert=True)
-    lof_norm = normalize_scores(lof_scores, invert=True)
+    ee_norm = normalize_scores(ee_scores, invert=True)
 
-    both_flagged = (iso_preds == -1) & (lof_preds == -1)
-    unsupervised = (iso_norm + lof_norm) / 2
+    both_flagged = (iso_preds == -1) & (ee_preds == -1)
+    unsupervised = (iso_norm + ee_norm) / 2
     unsupervised[both_flagged] *= 1.15
     unsupervised = np.clip(unsupervised, 0, 1)
 
@@ -438,7 +438,7 @@ def build_combined_score(supervised_scores, iso_scores, lof_scores,
     print(f"  Combined — mean: {combined.mean():.3f}  "
           f"max: {combined.max():.3f}  p98: {np.percentile(combined, 98):.3f}")
 
-    return combined, unsupervised, iso_norm, lof_norm
+    return combined, unsupervised, iso_norm, ee_norm
 
 
 # =============================================================================
@@ -524,7 +524,7 @@ def build_user_report(df, feature_cols):
         supervised_mean   =('supervised_score',    'mean'),
         unsupervised_max  =('unsupervised_score',  'max'),
         days_flagged_iso  =('iso_prediction',      lambda x: (x == -1).sum()),
-        days_flagged_lof  =('lof_prediction',      lambda x: (x == -1).sum()),
+        days_flagged_ee  =('ee_prediction',      lambda x: (x == -1).sum()),
         days_flagged_both =('flagged_by_both',     'sum'),
         known_insider_days=('insider_label',       'sum'),
     ).reset_index()
@@ -558,10 +558,10 @@ def build_user_report(df, feature_cols):
 # 7. THRESHOLD EXPORT
 # =============================================================================
 
-def export_thresholds(combined, supervised_scores, iso_scores, lof_scores, df):
+def export_thresholds(combined, supervised_scores, iso_scores, ee_scores, df):
     """
     Saves CERT score percentiles and raw score ranges for use as deployment
-    thresholds. The min/max ranges for IsoForest and LOF are saved so that
+    thresholds. The min/max ranges for IsoForest and EE are saved so that
     inference.py can normalize local scores against the same CERT scale,
     preventing local min/max compression from inflating everyone's score.
     """
@@ -573,13 +573,13 @@ def export_thresholds(combined, supervised_scores, iso_scores, lof_scores, df):
         'supervised_p95'       : float(np.percentile(supervised_scores, 95)),
         'iso_score_p98'        : float(np.percentile(iso_scores,         2)),
         'iso_score_p95'        : float(np.percentile(iso_scores,         5)),
-        'lof_score_p98'        : float(np.percentile(lof_scores,         2)),
+        'ee_score_p98'        : float(np.percentile(ee_scores,         2)),
         # CERT score ranges — used by inference.py to normalize local scores
         # on the same scale as training, preventing population size compression.
         'iso_score_min'        : float(iso_scores.min()),
         'iso_score_max'        : float(iso_scores.max()),
-        'lof_score_min'        : float(lof_scores.min()),
-        'lof_score_max'        : float(lof_scores.max()),
+        'ee_score_min'        : float(ee_scores.min()),
+        'ee_score_max'        : float(ee_scores.max()),
         'contamination_used'   : CONFIG['contamination'],
         'training_rows'        : int(len(df)),
         'training_users'       : int(df['user'].nunique()),
@@ -625,11 +625,11 @@ def main():
         supervised_scores = rf_model.predict_proba(X)[:, 1]
 
     # Stage 2: Unsupervised
-    iso_model, iso_preds, iso_scores, lof_preds, lof_scores = run_unsupervised(X, df)
+    iso_model, iso_preds, iso_scores, ee_preds, ee_scores = run_unsupervised(X, df)
 
     # Stage 3: Combined
-    combined, unsupervised, iso_norm, lof_norm = build_combined_score(
-        supervised_scores, iso_scores, lof_scores, iso_preds, lof_preds
+    combined, unsupervised, iso_norm, ee_norm = build_combined_score(
+        supervised_scores, iso_scores, ee_scores, iso_preds, ee_preds
     )
 
     df['supervised_score']    = supervised_scores
@@ -637,11 +637,11 @@ def main():
     df['combined_risk_score'] = combined
     df['iso_prediction']      = iso_preds
     df['iso_score']           = iso_scores
-    df['lof_prediction']      = lof_preds
-    df['lof_score']           = lof_scores
+    df['ee_prediction']      = ee_preds
+    df['ee_score']           = ee_scores
     df['iso_score_norm']      = iso_norm
-    df['lof_score_norm']      = lof_norm
-    df['flagged_by_both']     = ((iso_preds == -1) & (lof_preds == -1)).astype(int)
+    df['ee_score_norm']      = ee_norm
+    df['flagged_by_both']     = ((iso_preds == -1) & (ee_preds == -1)).astype(int)
 
     # SHAP
     shap_df, _        = build_shap_explanations(rf_model, X, df, feature_cols)
@@ -655,7 +655,7 @@ def main():
     print("  DEPLOYMENT THRESHOLDS")
     print("="*60)
     thresholds = export_thresholds(combined, supervised_scores,
-                                   iso_scores, lof_scores, df)
+                                   iso_scores, ee_scores, df)
 
     # Save
     daily_path = os.path.join(CONFIG['base_path'], CONFIG['output_daily'])
@@ -682,7 +682,7 @@ def main():
             print(f"    {m:<12}: {v.mean():.3f} ± {v.std():.3f}")
     print(f"\n  Unsupervised:")
     print(f"    IsoForest flagged : {(iso_preds==-1).sum():,} days")
-    print(f"    LOF flagged       : {(lof_preds==-1).sum():,} days")
+    print(f"    EE flagged       : {(ee_preds==-1).sum():,} days")
     print(f"    Both agreed       : {df['flagged_by_both'].sum():,} days")
 
     n = CONFIG['report_top_n']
