@@ -112,6 +112,7 @@ def pull_features() -> pd.DataFrame:
                 job_site_visits_flag,
                 job_search_plus_usb_week
             FROM daily_features
+            WHERE username NOT LIKE 'synth_%'
             ORDER BY username, feature_date
         """, conn)
     finally:
@@ -233,6 +234,55 @@ def write_scores(run_id, daily_df: pd.DataFrame, user_report: pd.DataFrame, shap
                             ON CONFLICT (device_id, username, score_date, run_id) DO NOTHING
                         """, shap_data)
                         log(f"  → {len(shap_data)} rows written to shap_values")
+
+                # Insert synthetic features into daily_features
+                synth_csv = OUTPUT_DIR / "synthetic_population.csv"
+                if synth_csv.exists():
+                    synth_features_df = pd.read_csv(synth_csv)
+                    synth_feature_data = [(
+                        device_id,
+                        str(r['user']), _safe_date(r['date']),
+                        _safe_float(r.get('total_active_minutes_day')),
+                        _safe_float(r.get('after_hours_session_count')),
+                        _safe_float(r.get('weekend_session_flag')),
+                        _safe_float(r.get('logon_count_zscore')),
+                        _safe_float(r.get('logon_count_zscore_has_baseline')),
+                        _safe_float(r.get('usb_count')),
+                        _safe_float(r.get('usb_after_hours_flag')),
+                        _safe_float(r.get('usb_on_weekend_flag')),
+                        _safe_float(r.get('usb_device_diversity_monthly')),
+                        _safe_float(r.get('usb_count_zscore')),
+                        _safe_float(r.get('usb_count_zscore_has_baseline')),
+                        _safe_float(r.get('job_site_visits_flag')),
+                        _safe_float(r.get('job_search_plus_usb_week'))
+                    ) for _, r in synth_features_df.iterrows()]
+
+                    if synth_feature_data:
+                        execute_values(cur, """
+                            INSERT INTO daily_features (
+                                device_id, username, feature_date,
+                                total_active_minutes_day, after_hours_session_count, weekend_session_flag,
+                                logon_count_zscore, logon_count_zscore_has_baseline,
+                                usb_count, usb_after_hours_flag, usb_on_weekend_flag,
+                                usb_device_diversity_monthly, usb_count_zscore,
+                                usb_count_zscore_has_baseline, job_site_visits_flag, job_search_plus_usb_week
+                            ) VALUES %s
+                            ON CONFLICT (device_id, username, feature_date) DO UPDATE SET
+                                total_active_minutes_day = EXCLUDED.total_active_minutes_day,
+                                after_hours_session_count = EXCLUDED.after_hours_session_count,
+                                weekend_session_flag = EXCLUDED.weekend_session_flag,
+                                logon_count_zscore = EXCLUDED.logon_count_zscore,
+                                logon_count_zscore_has_baseline = EXCLUDED.logon_count_zscore_has_baseline,
+                                usb_count = EXCLUDED.usb_count,
+                                usb_after_hours_flag = EXCLUDED.usb_after_hours_flag,
+                                usb_on_weekend_flag = EXCLUDED.usb_on_weekend_flag,
+                                usb_device_diversity_monthly = EXCLUDED.usb_device_diversity_monthly,
+                                usb_count_zscore = EXCLUDED.usb_count_zscore,
+                                usb_count_zscore_has_baseline = EXCLUDED.usb_count_zscore_has_baseline,
+                                job_site_visits_flag = EXCLUDED.job_site_visits_flag,
+                                job_search_plus_usb_week = EXCLUDED.job_search_plus_usb_week
+                        """, synth_feature_data)
+                        log(f"  → {len(synth_feature_data)} rows written to daily_features (synthetic data)")
 
                 cur.execute("""
                     UPDATE pipeline_runs
