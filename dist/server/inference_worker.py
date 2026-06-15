@@ -148,9 +148,9 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.
                     _safe_int(r.get('iso_prediction')),
                     _safe_float(r.get('iso_score')),
                     _safe_float(r.get('iso_score_norm')),
-                    _safe_int(r.get('lof_prediction')),
-                    _safe_float(r.get('lof_score')),
-                    _safe_float(r.get('lof_score_norm')),
+                    _safe_int(r.get('ee_prediction')),
+                    _safe_float(r.get('ee_score')),
+                    _safe_float(r.get('ee_score_norm')),
                     _safe_int(r.get('flagged_by_both')),
                     _safe_int(r.get('above_threshold')),
                     _safe_int(r.get('is_synthetic')),
@@ -162,7 +162,7 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.
                             device_id, run_id, username, score_date,
                             supervised_score, unsupervised_score, combined_risk_score,
                             iso_prediction, iso_score, iso_score_norm,
-                            lof_prediction, lof_score, lof_score_norm,
+                            ee_prediction, ee_score, ee_score_norm,
                             flagged_by_both, above_threshold, is_synthetic
                         ) VALUES %s
                         ON CONFLICT (device_id, username, score_date, run_id) DO NOTHING
@@ -185,9 +185,9 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.
                     _safe_float(r.get('unsupervised_max')),
                     _safe_float(r.get('unsupervised_mean')),
                     _safe_float(r.get('iso_score_norm_mean')),
-                    _safe_float(r.get('lof_score_norm_mean')),
+                    _safe_float(r.get('ee_score_norm_mean')),
                     _safe_int(r.get('days_flagged_iso')),
-                    _safe_int(r.get('days_flagged_lof')),
+                    _safe_int(r.get('days_flagged_ee')),
                     _safe_int(r.get('days_flagged_both')),
                     _safe_int(r.get('total_days')),
                     _safe_date(r.get('peak_date')),
@@ -200,8 +200,8 @@ def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.
                             device_id, run_id, username,
                             rank, is_synthetic, days_above_threshold, final_risk_score,
                             supervised_max, supervised_mean, unsupervised_max, unsupervised_mean,
-                            iso_score_norm_mean, lof_score_norm_mean,
-                            days_flagged_iso, days_flagged_lof, days_flagged_both,
+                            iso_score_norm_mean, ee_score_norm_mean,
+                            days_flagged_iso, days_flagged_ee, days_flagged_both,
                             total_days, peak_date, composite_rank_score
                         ) VALUES %s
                         ON CONFLICT (device_id, username, run_id) DO NOTHING

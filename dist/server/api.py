@@ -67,9 +67,9 @@ def users():
             ur.unsupervised_max,
             ur.unsupervised_mean,
             ur.iso_score_norm_mean,
-            ur.lof_score_norm_mean,
+            ur.ee_score_norm_mean,
             ur.days_flagged_iso,
-            ur.days_flagged_lof,
+            ur.days_flagged_ee,
             ur.days_flagged_both,
             ur.total_days,
             ur.peak_date,
@@ -81,10 +81,10 @@ def users():
     """)
     # coerce types
     int_cols   = ("rank","is_synthetic","days_above_threshold","days_flagged_iso",
-                  "days_flagged_lof","days_flagged_both","total_days")
+                  "days_flagged_ee","days_flagged_both","total_days")
     float_cols = ("final_risk_score","supervised_max","supervised_mean",
                   "unsupervised_max","unsupervised_mean","iso_score_norm_mean",
-                  "lof_score_norm_mean","composite_rank_score")
+                  "ee_score_norm_mean","composite_rank_score")
     for r in rows:
         for c in int_cols:
             try:    r[c] = int(r[c]) if r[c] is not None else 0
@@ -111,9 +111,9 @@ def daily():
             ds.iso_prediction,
             ds.iso_score,
             ds.iso_score_norm,
-            ds.lof_prediction,
-            ds.lof_score,
-            ds.lof_score_norm,
+            ds.ee_prediction,
+            ds.ee_score,
+            ds.ee_score_norm,
             ds.flagged_by_both,
             ds.above_threshold,
             ds.is_synthetic,
@@ -138,13 +138,13 @@ def daily():
         ORDER BY ds.username, ds.score_date, ds.run_id DESC
     """)
     int_cols   = ("after_hours_session_count","weekend_session_flag","is_synthetic",
-                  "iso_prediction","lof_prediction","flagged_by_both","above_threshold",
+                  "iso_prediction","ee_prediction","flagged_by_both","above_threshold",
                   "job_site_visits_flag","job_search_plus_usb_week","usb_after_hours_flag",
                   "usb_on_weekend_flag","logon_count_zscore_has_baseline","usb_count_zscore_has_baseline")
     float_cols = ("total_active_minutes_day","logon_count_zscore","usb_count",
                   "usb_device_diversity_monthly","usb_count_zscore","supervised_score",
-                  "unsupervised_score","combined_risk_score","iso_score","lof_score",
-                  "iso_score_norm","lof_score_norm")
+                  "unsupervised_score","combined_risk_score","iso_score","ee_score",
+                  "iso_score_norm","ee_score_norm")
     for r in rows:
         for c in int_cols:
             try:    r[c] = int(r[c]) if r[c] is not None else 0
