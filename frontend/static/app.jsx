@@ -228,6 +228,7 @@ function SettingsPanel({ onClose, onDone, dark }) {
     normal_phase_days: 20, phased: true, random_scenarios: true,
   });
   const [inferCfg, setInferCfg] = React.useState({
+    contamination: 0.05,
     threshold: 0.3793,
   });
   const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
@@ -399,11 +400,19 @@ function App() {
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {sortedUsers.map((u, i) => (
-              <option key={u.user} value={u.user}>
-                #{i + 1} {u.user}
-              </option>
-            ))}
+            {[...usersData].sort((a, b) => {
+              const typeA = a.user.includes('insider') ? 1 : a.user.includes('external') ? 2 : 3;
+              const typeB = b.user.includes('insider') ? 1 : b.user.includes('external') ? 2 : 3;
+              if (typeA !== typeB) return typeA - typeB;
+              return a.user.localeCompare(b.user);
+            }).map((u) => {
+              const rank = sortedUsers.findIndex(su => su.user === u.user) + 1;
+              return (
+                <option key={u.user} value={u.user}>
+                  #{rank} {u.user}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
@@ -539,13 +548,10 @@ function App() {
                 <tr>
                   <th>Date</th>
                   <th>Risk score</th>
-                  <th>After-hours sessions</th>
-                  <th>USB devices</th>
-                  <th>USB after-hours</th>
-                  <th>Job site visit</th>
-                  <th>Weekend session</th>
-                  <th>IsoForest</th>
-                  <th>Elliptic Env</th>
+                  <th>Active Hours</th>
+                  <th>Flags Triggered</th>
+                  <th>Volume Spikes</th>
+                  <th>AI Models</th>
                   <th></th>
                 </tr>
               </thead>
@@ -553,18 +559,50 @@ function App() {
                 {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => {
                   const isBreech = +row.above_threshold === 1;
                   const isoAnom  = +row.iso_prediction === -1;
-                  const eeAnom  = +row.ee_prediction === -1;
+                  const eeAnom   = +row.ee_prediction === -1;
+
+                  const dt = new Date(row.date + 'T00:00:00Z');
+                  const isWeekend = dt.getUTCDay() === 5 || dt.getUTCDay() === 6;
+
+                  // Collect boolean flags
+                  const flags = [];
+                  if (+row.after_hours_session_count > 0) {
+                    flags.push(<span key="ah" className="flag-pill pill-amber" style={{marginRight: 4}}>After-hours login</span>);
+                  }
+                  if (+row.usb_count > 0) {
+                    flags.push(<span key="u" className="flag-pill pill-amber" style={{marginRight: 4}}>Used USB</span>);
+                  }
+                  if (+row.usb_after_hours_flag) flags.push(<span key="uah" className="flag-pill pill-red" style={{marginRight: 4}}>USB after-hours</span>);
+                  if (+row.job_site_visits_flag) flags.push(<span key="js" className="flag-pill pill-amber" style={{marginRight: 4}}>Job site visit</span>);
+                  if (+row.weekend_session_flag) flags.push(<span key="ws" className="flag-pill pill-amber" style={{marginRight: 4}}>Weekend session</span>);
+
+                  // Collect z-score spikes
+                  const spikes = [];
+                  if (+row.logon_count_zscore > 1.5) {
+                    const z = Number(row.logon_count_zscore).toFixed(1);
+                    spikes.push(<span key="zlogon" className={`flag-pill ${z > 2.5 ? 'pill-red' : 'pill-amber'}`} style={{marginRight: 4}}>Logons (+{z}σ)</span>);
+                  }
+                  if (+row.usb_count_zscore > 1.5) {
+                    const z = Number(row.usb_count_zscore).toFixed(1);
+                    spikes.push(<span key="zusb" className={`flag-pill ${z > 2.5 ? 'pill-red' : 'pill-amber'}`} style={{marginRight: 4}}>USB Activity (+{z}σ)</span>);
+                  }
+
+                  // Collect AI models
+                  const models = [];
+                  if (isoAnom) models.push(<span key="iso" className="flag-pill pill-red" style={{marginRight: 4}}>IsoForest</span>);
+                  if (eeAnom) models.push(<span key="ee" className="flag-pill pill-red" style={{marginRight: 4}}>Elliptic Env</span>);
+
                   return (
-                    <tr key={row.date} className={isBreech ? "ar" : ""}>
-                      <td className="f-date">{row.date.slice(5)}</td>
+                    <tr key={row.date} className={`${isBreech ? "ar " : ""}${isWeekend ? "weekend" : ""}`.trim()}>
+                      <td className="f-date">
+                        {row.date.slice(5)}
+                        {isWeekend && <span style={{marginLeft: 6, fontSize: '0.8em', color: 'var(--amber)', opacity: 0.8}}>[W]</span>}
+                      </td>
                       <td><span className="f-risk" style={{ color: scoreColor(row.combined_risk_score) }}>{pct(row.combined_risk_score)}</span></td>
-                      <td className={+row.after_hours_session_count > 0 ? "f-val-hi" : "f-val"}>{row.after_hours_session_count}</td>
-                      <td className={+row.usb_count > 0 ? "f-val-hi" : "f-val"}>{row.usb_count}</td>
-                      <td>{+row.usb_after_hours_flag ? <span className="flag-pill pill-red">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{+row.job_site_visits_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{+row.weekend_session_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{isoAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
-                      <td>{eeAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
+                      <td className="f-val-hi">{row.total_active_minutes_day > 0 ? (row.total_active_minutes_day / 60).toFixed(1) + "h" : "—"}</td>
+                      <td>{flags.length > 0 ? flags : <span className="f-nil">—</span>}</td>
+                      <td>{spikes.length > 0 ? spikes : <span className="f-nil">—</span>}</td>
+                      <td>{models.length > 0 ? models : <span className="f-nil">—</span>}</td>
                       <td>{isBreech ? <span className="bdot" /> : ""}</td>
                     </tr>
                   );

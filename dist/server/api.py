@@ -12,7 +12,7 @@ import urllib.request
 
 import psycopg2
 import psycopg2.extras
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -56,7 +56,10 @@ def users():
     include_synth = request.args.get("include_synthetic", "false").lower() == "true"
     synth_filter  = "" if include_synth else "WHERE ur.is_synthetic = 0"
     rows = _query(f"""
-        SELECT DISTINCT ON (ur.username)
+        WITH latest_run AS (
+            SELECT run_id FROM pipeline_runs WHERE status = 'success' ORDER BY started_at DESC LIMIT 1
+        )
+        SELECT 
             ur.username                 AS user,
             ur.rank,
             ur.is_synthetic,
@@ -75,9 +78,9 @@ def users():
             ur.peak_date,
             ur.composite_rank_score
         FROM user_risk ur
-        JOIN pipeline_runs pr ON pr.run_id = ur.run_id
+        JOIN latest_run lr ON ur.run_id = lr.run_id
         {synth_filter}
-        ORDER BY ur.username, pr.started_at DESC
+        ORDER BY ur.rank ASC
     """)
     # coerce types
     int_cols   = ("rank","is_synthetic","days_above_threshold","days_flagged_iso",
@@ -102,7 +105,10 @@ def daily():
     include_synth = request.args.get("include_synthetic", "false").lower() == "true"
     synth_filter  = "" if include_synth else "WHERE ds.is_synthetic = 0"
     rows = _query(f"""
-        SELECT DISTINCT ON (ds.username, ds.score_date)
+        WITH latest_run AS (
+            SELECT run_id FROM pipeline_runs WHERE status = 'success' ORDER BY started_at DESC LIMIT 1
+        )
+        SELECT 
             ds.username                 AS user,
             ds.score_date               AS date,
             ds.supervised_score,
@@ -131,11 +137,12 @@ def daily():
             df.job_search_plus_usb_week,
             df.total_active_minutes_day
         FROM daily_scores ds
+        JOIN latest_run lr ON ds.run_id = lr.run_id
         LEFT JOIN daily_features df
             ON df.username = ds.username
             AND df.feature_date = ds.score_date
         {synth_filter}
-        ORDER BY ds.username, ds.score_date, ds.run_id DESC
+        ORDER BY ds.username, ds.score_date ASC
     """)
     int_cols   = ("after_hours_session_count","weekend_session_flag","is_synthetic",
                   "iso_prediction","ee_prediction","flagged_by_both","above_threshold",
@@ -160,7 +167,10 @@ def daily():
 @app.route("/api/shap")
 def shap():
     rows = _query("""
-        SELECT DISTINCT ON (sv.username, sv.score_date)
+        WITH latest_run AS (
+            SELECT run_id FROM pipeline_runs WHERE status = 'success' ORDER BY started_at DESC LIMIT 1
+        )
+        SELECT 
             sv.username AS user,
             sv.score_date AS date,
             sv.after_hours_session_count,
@@ -175,7 +185,8 @@ def shap():
             sv.job_site_visits_flag,
             sv.job_search_plus_usb_week
         FROM shap_values sv
-        ORDER BY sv.username, sv.score_date, sv.run_id DESC
+        JOIN latest_run lr ON sv.run_id = lr.run_id
+        ORDER BY sv.username, sv.score_date ASC
     """)
     shap_cols = (
         "after_hours_session_count", "weekend_session_flag", "logon_count_zscore",
@@ -217,23 +228,62 @@ def status():
     return jsonify({"db": db_ok})
 
 
+import time
+
+@app.route("/api/status_stream")
+def status_stream():
+    def generate():
+        last_state = None
+        while True:
+            try:
+                res1 = _query("SELECT COUNT(*) as c FROM daily_features")
+                features_count = int(res1[0]["c"]) if res1 else 0
+
+                res2 = _query("SELECT COUNT(*) as c FROM user_risk")
+                users_count = int(res2[0]["c"]) if res2 else 0
+
+                res3 = _query("SELECT status FROM pipeline_runs ORDER BY started_at DESC LIMIT 1")
+                pipeline_status = res3[0]["status"] if res3 else "idle"
+
+                current_state = (features_count, users_count, pipeline_status)
+                if current_state != last_state:
+                    data = {
+                        "features_count": features_count,
+                        "has_data": features_count > 0,
+                        "users_count": users_count,
+                        "pipeline_status": pipeline_status
+                    }
+                    yield f"data: {json.dumps(data)}\n\n"
+                    last_state = current_state
+            except Exception:
+                pass
+            time.sleep(2)
+    return Response(generate(), mimetype="text/event-stream")
+
+
+from flask import request
+
 @app.route("/api/run/synthetic", methods=["POST"])
 def run_synthetic():
     """Trigger the worker to re-run synthetic generation + inference"""
-    return _trigger_worker()
+    payload = request.get_json(silent=True) or {}
+    return _trigger_worker(payload)
 
 
 @app.route("/api/run/inference", methods=["POST"])
 def run_inference():
     """Trigger the worker to run inference"""
-    return _trigger_worker()
+    payload = request.get_json(silent=True) or {}
+    return _trigger_worker(payload)
 
 
-def _trigger_worker():
+def _trigger_worker(payload=None):
+    if payload is None:
+        payload = {}
     try:
         req = urllib.request.Request(
             f"{WORKER_URL}/run",
-            data=b"{}",
+            data=json.dumps(payload).encode('utf-8'),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
