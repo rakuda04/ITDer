@@ -125,7 +125,7 @@ function TimelineChart({ daily, sel, dark }) {
           },
           {
             label: "Elliptic Env",
-            data: rows.map((d) => +(d.lof_score_norm * 100).toFixed(1)),
+            data: rows.map((d) => +(d.ee_score_norm * 100).toFixed(1)),
             borderColor: "#059669", borderDash: [2, 4], tension: 0.35,
             fill: false, borderWidth: 1.5, pointRadius: 0,
           },
@@ -414,7 +414,7 @@ function App() {
           <StatCard label="Rank"             value={`#${sortedUsers.findIndex(u => u.user === sel) + 1} of ${usersData.length}`}                  cls={user.rank <= 3 ? "r" : user.rank <= 10 ? "a" : "g"} accent="r" />
           <StatCard label="Anomaly signal"   value={pct(user.unsupervised_mean ?? user.unsupervised_max)}     cls={tier === "critical" ? "r" : tier === "high" ? "a" : "g"} accent="a" />
           <StatCard label="ISO anomalies"    value={user.days_flagged_iso}        cls={user.days_flagged_iso > 5 ? "r" : user.days_flagged_iso > 0 ? "a" : "g"} accent="b" />
-          <StatCard label="EE anomalies"     value={user.days_flagged_lof}        cls={user.days_flagged_lof > 5 ? "r" : user.days_flagged_lof > 0 ? "a" : "g"} accent="b" />
+          <StatCard label="EE anomalies"     value={user.days_flagged_ee}        cls={user.days_flagged_ee > 5 ? "r" : user.days_flagged_ee > 0 ? "a" : "g"} accent="b" />
           <StatCard label="Both flagged"     value={user.days_flagged_both}       cls={user.days_flagged_both > 0 ? "r" : "g"} accent="r" />
           <StatCard label="Days monitored"   value={user.total_days}              cls="m" accent="b" />
         </div>
@@ -479,14 +479,14 @@ function App() {
             <div className="ptitle">Score breakdown — {user.user}</div>
             <ScoreBar label="Avg anomaly signal"  sub="Mean combined score across all days — matches leaderboard %"   value={user.unsupervised_mean ?? user.unsupervised_max} />
             <ScoreBar label="IsoForest mean"      sub="Avg IsoForest isolation score — how separated from population"  value={user.iso_score_norm_mean ?? 0} />
-            <ScoreBar label="Elliptic Env mean"   sub="Avg EE score — distance from normal cluster"                    value={user.lof_score_norm_mean ?? 0} />
+            <ScoreBar label="Elliptic Env mean"   sub="Avg EE score — distance from normal cluster"                    value={user.ee_score_norm_mean ?? 0} />
 
             <div className="ptitle" style={{ marginTop: 20 }}>Anomaly detection</div>
             <div className="anogrid">
               {[
                 ["Days flagged", user.days_above_threshold, "var(--red)"],
                 ["ISO flagged",  user.days_flagged_iso,     "var(--accent)"],
-                ["EE flagged",   user.days_flagged_lof,     "var(--green)"],
+                ["EE flagged",   user.days_flagged_ee,     "var(--green)"],
                 ["Both flagged", user.days_flagged_both,    "var(--red)"],
               ].map(([lbl, val, col]) => (
                 <div className="anocell" key={lbl}>
@@ -553,7 +553,7 @@ function App() {
                 {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => {
                   const isBreech = +row.above_threshold === 1;
                   const isoAnom  = +row.iso_prediction === -1;
-                  const lofAnom  = +row.lof_prediction === -1;
+                  const eeAnom  = +row.ee_prediction === -1;
                   return (
                     <tr key={row.date} className={isBreech ? "ar" : ""}>
                       <td className="f-date">{row.date.slice(5)}</td>
@@ -564,7 +564,7 @@ function App() {
                       <td>{+row.job_site_visits_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
                       <td>{+row.weekend_session_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
                       <td>{isoAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
-                      <td>{lofAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
+                      <td>{eeAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
                       <td>{isBreech ? <span className="bdot" /> : ""}</td>
                     </tr>
                   );

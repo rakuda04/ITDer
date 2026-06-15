@@ -33,14 +33,14 @@ def read_csv(filename: str) -> list[dict]:
 
 def coerce_users(rows):
     for r in rows:
-        for col in ("rank", "is_synthetic", "days_flagged_iso", "days_flagged_lof", "days_flagged_both"):
+        for col in ("rank", "is_synthetic", "days_flagged_iso", "days_flagged_ee", "days_flagged_both"):
             if col in r:
                 try:
                     r[col] = int(r[col])
                 except (ValueError, TypeError):
                     r[col] = 0
         for col in ("final_risk_score", "supervised_max", "supervised_mean", "unsupervised_max",
-                    "unsupervised_mean", "iso_score_norm_mean", "lof_score_norm_mean"):
+                    "unsupervised_mean", "iso_score_norm_mean", "ee_score_norm_mean"):
             if col in r:
                 try:
                     r[col] = float(r[col])
@@ -52,7 +52,7 @@ def coerce_users(rows):
 def coerce_daily(rows):
     int_cols = (
         "after_hours_session_count", "weekend_session_flag", "is_synthetic",
-        "iso_prediction", "lof_prediction", "flagged_by_both", "above_threshold",
+        "iso_prediction", "ee_prediction", "flagged_by_both", "above_threshold",
         "job_site_visits_flag", "job_search_plus_usb_week",
         "usb_after_hours_flag", "usb_on_weekend_flag",
         "logon_count_zscore_has_baseline", "usb_count_zscore_has_baseline",
@@ -61,7 +61,7 @@ def coerce_daily(rows):
         "total_active_minutes_day", "logon_count_zscore", "usb_count",
         "usb_device_diversity_monthly", "usb_count_zscore",
         "supervised_score", "unsupervised_score", "combined_risk_score",
-        "iso_score", "lof_score", "iso_score_norm", "lof_score_norm",
+        "iso_score", "ee_score", "iso_score_norm", "ee_score_norm",
     )
     for r in rows:
         for col in int_cols:

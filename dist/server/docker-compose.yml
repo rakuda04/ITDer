@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword} 
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password} 
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d
@@ -21,8 +21,11 @@ services:
     container_name: itder_pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@itder.local}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@itder.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-password}
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    volumes:
+      - ./servers.json:/pgadmin4/servers.json
     ports:
       - "5050:80"
     depends_on:
@@ -39,7 +42,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
       - "8000:8000"
     depends_on:
@@ -57,7 +60,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       ITDER_SCHEDULE: "0"  
       ITDER_CRON: "0 2 * * *"  
     depends_on:
@@ -75,7 +78,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DB: itder
       POSTGRES_USER: itder_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
       - "5001:5000"
     depends_on:

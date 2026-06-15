@@ -216,33 +216,27 @@ def _generate_insider_day(stats: dict, scenario: int,
     row = _generate_normal_day(stats, rng, baseline_stats)
 
     if scenario == 1:
-        # CERT data: insiders doing after-hours USB exfil still visited job sites
-        # (job_site_visits_flag CERT insider mean=0.69, gap=+0.21 vs normals)
-        # Previously set to 0 — that contradicted what the RF learned from CERT.
-        row['after_hours_session_count']     = int(rng.randint(2, 6))
-        row['usb_count']                     = int(rng.randint(3, 8))
+        row['after_hours_session_count']     = int(rng.randint(2, 4))
+        row['usb_count']                     = int(rng.randint(2, 5))
         row['usb_after_hours_flag']          = 1
-        row['usb_count_zscore']              = float(rng.uniform(2.5, 4.5))
+        row['usb_count_zscore']              = float(rng.uniform(2.0, 3.0))
         row['usb_count_zscore_has_baseline'] = 1
         row['job_site_visits_flag']          = 1
         row['job_search_plus_usb_week']      = 1
 
     elif scenario == 2:
         row['job_site_visits_flag']          = 1
-        row['usb_count']                     = int(rng.randint(4, 10))
-        row['usb_count_zscore']              = float(rng.uniform(2.0, 4.0))
+        row['usb_count']                     = int(rng.randint(3, 6))
+        row['usb_count_zscore']              = float(rng.uniform(1.5, 3.0))
         row['usb_count_zscore_has_baseline'] = 1
         row['job_search_plus_usb_week']      = 1
         row['after_hours_session_count']     = int(rng.randint(0, 2))
 
     elif scenario == 3:
-        # CERT data: keylogger insiders also showed job site activity
-        # (same CERT insider population — job_site_visits_flag gap=+0.21)
-        # Previously set to 0 — same contradiction as Scenario 1.
-        row['after_hours_session_count']     = int(rng.randint(3, 7))
-        row['usb_count']                     = int(rng.randint(2, 5))
+        row['after_hours_session_count']     = int(rng.randint(2, 4))
+        row['usb_count']                     = int(rng.randint(1, 4))
         row['usb_after_hours_flag']          = 1
-        row['usb_count_zscore']              = float(rng.uniform(1.5, 3.5))
+        row['usb_count_zscore']              = float(rng.uniform(1.5, 2.5))
         row['usb_count_zscore_has_baseline'] = 1
         row['weekend_session_flag']          = int(rng.randint(0, 2))
         row['job_site_visits_flag']          = 1

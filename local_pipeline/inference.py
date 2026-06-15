@@ -12,7 +12,7 @@
 #   Stage 4 — Combined risk score + SHAP explanations
 #
 # Note on normalization:
-#   IsoForest and LOF raw scores are normalized using the min/max
+#   IsoForest and EE raw scores are normalized using the min/max
 #   ranges from CERT training (stored in cert_thresholds.json).
 #   This ensures a score of 0.5 locally means the same thing as
 #   0.5 on CERT — preventing the small local population from
@@ -36,7 +36,6 @@
 import sys
 sys.dont_write_bytecode = True
 
-# Force UTF-8 output on Windows (default cp1252 can't encode → ✅ etc.)
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -110,15 +109,14 @@ def _load_thresholds():
         t = json.load(f)
     print(f"[infer] Loaded thresholds — recommended: {t['recommended_threshold']:.4f}")
 
-    for key in ('iso_score_min', 'iso_score_max', 'lof_score_min', 'lof_score_max'):
+    for key in ('iso_score_min', 'iso_score_max', 'ee_score_min', 'ee_score_max'):
         if key not in t:
             print(f"[infer] WARNING: '{key}' missing from cert_thresholds.json. "
                   f"Re-run model_training.py to regenerate thresholds with score ranges.")
 
     # Override threshold: RF is disabled so the CERT p98 combined threshold is
     # meaningless. Use unsupervised-only p95 derived from synthetic normal population.
-    t['recommended_threshold'] = 0.3793
-    print(f"[infer] Threshold overridden to 0.3793 (unsupervised p99 of synthetic normals)")
+
     return t
 
 
@@ -239,7 +237,7 @@ def _run_elliptic(X, models, df):
     return preds, scores
 
 
-def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds, thresholds):
+def _build_combined(supervised, iso_scores, ee_scores, iso_preds, ee_preds, thresholds):
     print("[infer] Stage 4: Building combined risk score...")
 
     if 'iso_score_min' in thresholds and 'iso_score_max' in thresholds:
@@ -251,22 +249,27 @@ def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds, th
         iso_max = float(iso_scores.max())
         print(f"  → WARNING: Using local iso range (re-run model_training.py for CERT anchoring)")
 
-    # EE uses local normalization — no CERT anchoring needed since EE is always fitted locally
-    lof_min = float(lof_scores.min())
-    lof_max = float(lof_scores.max())
+    # EE returns negative Mahalanobis distances which grow exponentially.
+    # Convert to log-distance so extreme outliers don't squash the normalization.
+    log_dists = np.log1p(np.maximum(-ee_scores, 0))
+    d_min = float(np.percentile(log_dists, 1))
+    d_max = float(np.percentile(log_dists, 99))
+    if d_max <= d_min:
+        d_max = d_min + 1e-9
 
     iso_norm = 1 - (iso_scores - iso_min) / (iso_max - iso_min + 1e-9)
     iso_norm = np.clip(iso_norm, 0, 1)
 
-    lof_norm = 1 - (lof_scores - lof_min) / (lof_max - lof_min + 1e-9)
-    lof_norm = np.clip(lof_norm, 0, 1)
+    d_clipped = np.clip(log_dists, d_min, d_max)
+    ee_norm = (d_clipped - d_min) / (d_max - d_min + 1e-9)
+    ee_norm = np.clip(ee_norm, 0, 1)
 
-    unsupervised = (iso_norm + lof_norm) / 2
+    unsupervised = (iso_norm + ee_norm) / 2
     combined     = (CONFIG['weight_supervised']   * supervised +
                     CONFIG['weight_unsupervised'] * unsupervised)
     if CONFIG['weight_supervised'] == 0.0:
         print(f"  → RF disabled (weight=0). Combined score = unsupervised only.")
-    return combined, unsupervised, iso_norm, lof_norm
+    return combined, unsupervised, iso_norm, ee_norm
 
 
 def _build_shap(rf, X_aligned, df, feature_cols):
@@ -296,9 +299,9 @@ def _build_user_report(df, threshold):
         unsupervised_max     =('unsupervised_score',  'max'),
         unsupervised_mean    =('unsupervised_score',  'mean'),
         iso_score_norm_mean  =('iso_score_norm',      'mean'),
-        lof_score_norm_mean  =('lof_score_norm',      'mean'),
+        ee_score_norm_mean  =('ee_score_norm',      'mean'),
         days_flagged_iso     =('iso_prediction',      lambda x: (x == -1).sum()),
-        days_flagged_lof     =('lof_prediction',      lambda x: (x == -1).sum()),
+        days_flagged_ee     =('ee_prediction',      lambda x: (x == -1).sum()),
         days_flagged_both    =('flagged_by_both',     'sum'),
         total_days           =('combined_risk_score', 'count'),
     ).reset_index()
@@ -353,11 +356,11 @@ def run():
     iso_preds, iso_scores = _run_iso(X_aligned, models, aligned_cols, df)
 
     # Stage 3 — Elliptic Envelope
-    lof_preds, lof_scores = _run_elliptic(X_aligned, models, df)
+    ee_preds, ee_scores = _run_elliptic(X_aligned, models, df)
 
     # Stage 4 — Combined
-    combined, unsupervised, iso_norm, lof_norm = _build_combined(
-        supervised_scores, iso_scores, lof_scores, iso_preds, lof_preds, thresholds
+    combined, unsupervised, iso_norm, ee_norm = _build_combined(
+        supervised_scores, iso_scores, ee_scores, iso_preds, ee_preds, thresholds
     )
 
     threshold = thresholds['recommended_threshold']
@@ -366,11 +369,11 @@ def run():
     df['combined_risk_score'] = combined
     df['iso_prediction']      = iso_preds
     df['iso_score']           = iso_scores
-    df['lof_prediction']      = lof_preds
-    df['lof_score']           = lof_scores
+    df['ee_prediction']      = ee_preds
+    df['ee_score']           = ee_scores
     df['iso_score_norm']      = iso_norm
-    df['lof_score_norm']      = lof_norm
-    df['flagged_by_both']     = ((iso_preds == -1) & (lof_preds == -1)).astype(int)
+    df['ee_score_norm']      = ee_norm
+    df['flagged_by_both']     = ((iso_preds == -1) & (ee_preds == -1)).astype(int)
     df['above_threshold']     = (combined >= threshold).astype(int)
 
     # SHAP
@@ -386,7 +389,7 @@ def run():
     user_report.to_csv(OUTPUT_USERS)
     shap_df.to_csv(OUTPUT_SHAP, index=False)
 
-    print(f"\n[infer] ✅ Outputs saved:")
+    print(f"\n[infer] Outputs saved:")
     print(f"  Per-day report : {OUTPUT_DAILY}")
     print(f"  User report    : {OUTPUT_USERS}")
     print(f"  SHAP values    : {OUTPUT_SHAP}")
