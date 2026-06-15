@@ -6,3 +6,4 @@ cert_pipeline/dataset
 !cert_pipeline/output/cert_thresholds.json
 !cert_pipeline/output/model_intake_final.csv
 local_pipeline/output
+docker-compose.override.yml
