@@ -123,20 +123,13 @@ def pull_features() -> pd.DataFrame:
 
 # ── write scores ──────────────────────────────────────────────
 
-def write_scores(daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.DataFrame):
+def write_scores(run_id, daily_df: pd.DataFrame, user_report: pd.DataFrame, shap_df: pd.DataFrame):
     log("Writing scores to Postgres...")
     conn = _connect()
-    run_id = None
     try:
         with conn:
             with conn.cursor() as cur:
                 device_id = _get_server_device(cur)
-
-                cur.execute("""
-                    INSERT INTO pipeline_runs (device_id, started_at, status)
-                    VALUES (%s, now(), 'running') RETURNING run_id
-                """, (device_id,))
-                run_id = cur.fetchone()[0]
 
                 # daily_scores — all users (real + synthetic)
                 score_data = [(
@@ -277,7 +270,7 @@ def _load_module(name, path):
     return module
 
 
-def run_inference(features_df: pd.DataFrame):
+def run_inference(features_df: pd.DataFrame, payload=None):
     log("Loading inference modules...")
     if str(WORKER_DIR) not in sys.path:
         sys.path.insert(0, str(WORKER_DIR))
@@ -298,32 +291,63 @@ def run_inference(features_df: pd.DataFrame):
     infer_mod.OUTPUT_USERS    = OUTPUT_DIR / "local_report_users.csv"
     infer_mod.OUTPUT_SHAP     = OUTPUT_DIR / "local_shap_values.csv"
 
+    if payload is None:
+        payload = {}
+        
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     features_df.to_csv(infer_mod.LOCAL_FEATURES, index=False)
     log(f"  → Wrote {len(features_df)} feature rows to local_model_intake.csv")
 
     log("Running synthetic_generator...")
-    synth_mod.generate(OUTPUT_DIR / "synthetic_population.csv")
+    synth_mod.generate(OUTPUT_DIR / "synthetic_population.csv", cfg_override=payload)
 
     log("Running inference...")
-    daily_df, user_report, shap_df = infer_mod.run()
+    daily_df, user_report, shap_df = infer_mod.run(cfg_override=payload)
 
     return daily_df, user_report, shap_df
 
 
 # ── main job ──────────────────────────────────────────────────
 
-def run_job():
+def _start_pipeline_run():
+    conn = _connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                device_id = _get_server_device(cur)
+                cur.execute("""
+                    INSERT INTO pipeline_runs (device_id, started_at, status)
+                    VALUES (%s, now(), 'running') RETURNING run_id
+                """, (device_id,))
+                return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+def _fail_pipeline_run(run_id):
+    if not run_id: return
+    conn = _connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE pipeline_runs SET status = 'failed', finished_at = now() WHERE run_id = %s", (run_id,))
+    finally:
+        conn.close()
+
+def run_job(payload=None, run_id=None):
     log("=" * 50)
     log("Inference worker started")
     log("=" * 50)
+    my_run_id = run_id
     try:
+        if not my_run_id:
+            my_run_id = _start_pipeline_run()
         features_df                      = pull_features()
-        daily_df, user_report, shap_df   = run_inference(features_df)
-        write_scores(daily_df, user_report, shap_df)
+        daily_df, user_report, shap_df   = run_inference(features_df, payload)
+        write_scores(my_run_id, daily_df, user_report, shap_df)
         log("Worker finished successfully.")
     except Exception as e:
         log(f"Worker failed: {e}")
+        _fail_pipeline_run(my_run_id)
         traceback.print_exc()
         sys.exit(1)
 
@@ -337,16 +361,27 @@ _flask_app = _Flask(__name__)
 _run_lock  = _threading.Lock()
 
 
+from flask import request
+
 @_flask_app.route("/run", methods=["POST"])
 def http_run():
+    payload = request.get_json(silent=True) or {}
     if not _run_lock.acquire(blocking=False):
         return _jsonify({"ok": False, "msg": "run already in progress"}), 429
-    def do_run():
+    
+    try:
+        run_id = _start_pipeline_run()
+    except Exception as e:
+        _run_lock.release()
+        return _jsonify({"ok": False, "msg": f"db error: {e}"}), 500
+
+    def do_run(rid, p):
         try:
-            run_job()
+            run_job(p, rid)
         finally:
             _run_lock.release()
-    _threading.Thread(target=do_run, daemon=True).start()
+            
+    _threading.Thread(target=do_run, args=(run_id, payload), daemon=True).start()
     return _jsonify({"ok": True, "msg": "inference started"})
 
 

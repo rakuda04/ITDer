@@ -768,3 +768,158 @@ body {
   background: var(--bg-hover);
   color: var(--text);
 }
+
+/* ── Get Started ─────────────────────────────────────────────────────────── */
+.get-started-view {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 80vh;
+}
+.gs-content {
+  max-width: 700px;
+  text-align: center;
+  animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.gs-title {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, var(--text), var(--text-3));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.gs-desc {
+  font-size: 16px;
+  color: var(--text-3);
+  margin-bottom: 48px;
+  line-height: 1.6;
+}
+.gs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  text-align: left;
+}
+.gs-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: var(--shadow);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.gs-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+}
+[data-theme="dark"] .gs-card:hover {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+.gs-card-icon {
+  font-size: 32px;
+  margin-bottom: 20px;
+}
+.gs-card-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+.gs-card-desc {
+  font-size: 14px;
+  color: var(--text-3);
+  line-height: 1.5;
+  margin-bottom: 24px;
+  flex-grow: 1;
+}
+.gs-btn {
+  background: var(--bg-subtle);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  font-size: 14px;
+}
+.gs-btn:hover {
+  background: var(--bg-hover);
+}
+.gs-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.gs-btn-primary:hover {
+  background: var(--accent-border);
+}
+.gs-code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+/* ── Interactive Status ─────────────────────────────────────────────────── */
+.gs-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 10px 24px;
+  margin: 0 auto 32px;
+  width: fit-content;
+  box-shadow: var(--shadow);
+}
+.gs-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.gs-ind-red {
+  background: #7f1d1d; /* darkened red */
+  box-shadow: 0 0 0 3px rgba(127, 29, 29, 0.2);
+}
+.gs-ind-green {
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2);
+}
+[data-theme="dark"] .gs-ind-green {
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.2);
+}
+.gs-status-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.gs-btn-loading {
+  opacity: 0.7;
+  cursor: wait;
+}
+.gs-log.err {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--red);
+  background: var(--red-soft);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--red-border);
+}
