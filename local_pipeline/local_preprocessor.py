@@ -266,7 +266,6 @@ def process_device(df, cfg):
 
     # DIFFERS FROM CERT: CERT measures nunique(pc) = distinct machines
     # (lateral movement). Here: nunique(device) = distinct USB devices
-    # used that month. Pending audit of CERT version before aligning.
     monthly_diversity = usb.groupby(['user', 'month'])['device'].nunique().reset_index(
         name='usb_device_diversity_monthly'
     )
@@ -310,7 +309,8 @@ def build_pipeline(cfg):
     if not Path(input_path).exists():
         raise FileNotFoundError(f"CRITICAL: Could not find {input_path}")
 
-    df = pd.read_csv(input_path)
+    
+    df = pd.read_csv(input_path, encoding='utf-8', low_memory=False)
     print(f"  → {len(df)} raw rows loaded")
 
     # ── process each source ──────────────────────────────────
@@ -418,7 +418,7 @@ def build_pipeline(cfg):
     # ── save ─────────────────────────────────────────────────
     output_path = cfg['output_file']
     final_df.to_csv(output_path, index=False)
-    print(f"[local_preprocessor] ✅ Shape: {final_df.shape} → saved to {output_path}")
+    print(f"[local_preprocessor]  Shape: {final_df.shape} → saved to {output_path}")
     return final_df
 
 
