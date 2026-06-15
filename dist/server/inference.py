@@ -274,7 +274,9 @@ def _build_combined(supervised, iso_scores, ee_scores, iso_preds, ee_preds, thre
 
 def _build_shap(rf, X_aligned, df, feature_cols):
     print("[infer] Building SHAP explanations...")
-    explainer = shap.TreeExplainer(rf)
+    
+    background = shap.sample(X_aligned, min(100, len(X_aligned)))
+    explainer = shap.TreeExplainer(rf, data=background, feature_perturbation='interventional')
     shap_vals = explainer.shap_values(X_aligned.values)
 
     if isinstance(shap_vals, list):

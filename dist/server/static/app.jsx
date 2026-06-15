@@ -553,7 +553,7 @@ function App() {
     threshold: 0.3793,
   });
   const [refresh, setRefresh]             = useState(0);
-  const [showSynthetic, setShowSynthetic] = useState(false);
+  const [showSynthetic, setShowSynthetic] = useState(true);
   const synthParam = showSynthetic ? "?include_synthetic=true" : "";
   const { data: usersData, loading: uL, error: uE } = useApi(`/api/users${synthParam}`, refresh);
   const { data: dailyAll,  loading: dL, error: dE } = useApi(`/api/daily${synthParam}`, refresh);
@@ -652,11 +652,19 @@ function App() {
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {sortedUsers.map((u, i) => (
-              <option key={u.user} value={u.user}>
-                #{i + 1} {u.user}
-              </option>
-            ))}
+            {[...usersData].sort((a, b) => {
+              const typeA = a.user.includes('insider') ? 1 : a.user.includes('external') ? 2 : 3;
+              const typeB = b.user.includes('insider') ? 1 : b.user.includes('external') ? 2 : 3;
+              if (typeA !== typeB) return typeA - typeB;
+              return a.user.localeCompare(b.user);
+            }).map((u) => {
+              const rank = sortedUsers.findIndex(su => su.user === u.user) + 1;
+              return (
+                <option key={u.user} value={u.user}>
+                  #{rank} {u.user}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>

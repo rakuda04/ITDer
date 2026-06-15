@@ -228,6 +228,7 @@ function SettingsPanel({ onClose, onDone, dark }) {
     normal_phase_days: 20, phased: true, random_scenarios: true,
   });
   const [inferCfg, setInferCfg] = React.useState({
+    contamination: 0.05,
     threshold: 0.3793,
   });
   const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
@@ -399,11 +400,19 @@ function App() {
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {sortedUsers.map((u, i) => (
-              <option key={u.user} value={u.user}>
-                #{i + 1} {u.user}
-              </option>
-            ))}
+            {[...usersData].sort((a, b) => {
+              const typeA = a.user.includes('insider') ? 1 : a.user.includes('external') ? 2 : 3;
+              const typeB = b.user.includes('insider') ? 1 : b.user.includes('external') ? 2 : 3;
+              if (typeA !== typeB) return typeA - typeB;
+              return a.user.localeCompare(b.user);
+            }).map((u) => {
+              const rank = sortedUsers.findIndex(su => su.user === u.user) + 1;
+              return (
+                <option key={u.user} value={u.user}>
+                  #{rank} {u.user}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
