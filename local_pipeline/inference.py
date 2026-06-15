@@ -36,7 +36,6 @@
 import sys
 sys.dont_write_bytecode = True
 
-# Force UTF-8 output on Windows (default cp1252 can't encode → ✅ etc.)
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -117,8 +116,7 @@ def _load_thresholds():
 
     # Override threshold: RF is disabled so the CERT p98 combined threshold is
     # meaningless. Use unsupervised-only p95 derived from synthetic normal population.
-    t['recommended_threshold'] = 0.3793
-    print(f"[infer] Threshold overridden to 0.3793 (unsupervised p99 of synthetic normals)")
+
     return t
 
 
@@ -251,14 +249,19 @@ def _build_combined(supervised, iso_scores, lof_scores, iso_preds, lof_preds, th
         iso_max = float(iso_scores.max())
         print(f"  → WARNING: Using local iso range (re-run model_training.py for CERT anchoring)")
 
-    # EE uses local normalization — no CERT anchoring needed since EE is always fitted locally
-    lof_min = float(lof_scores.min())
-    lof_max = float(lof_scores.max())
+    # EE returns negative Mahalanobis distances which grow exponentially.
+    # Convert to log-distance so extreme outliers don't squash the normalization.
+    log_dists = np.log1p(np.maximum(-lof_scores, 0))
+    d_min = float(np.percentile(log_dists, 1))
+    d_max = float(np.percentile(log_dists, 99))
+    if d_max <= d_min:
+        d_max = d_min + 1e-9
 
     iso_norm = 1 - (iso_scores - iso_min) / (iso_max - iso_min + 1e-9)
     iso_norm = np.clip(iso_norm, 0, 1)
 
-    lof_norm = 1 - (lof_scores - lof_min) / (lof_max - lof_min + 1e-9)
+    d_clipped = np.clip(log_dists, d_min, d_max)
+    lof_norm = (d_clipped - d_min) / (d_max - d_min + 1e-9)
     lof_norm = np.clip(lof_norm, 0, 1)
 
     unsupervised = (iso_norm + lof_norm) / 2
@@ -386,7 +389,7 @@ def run():
     user_report.to_csv(OUTPUT_USERS)
     shap_df.to_csv(OUTPUT_SHAP, index=False)
 
-    print(f"\n[infer] ✅ Outputs saved:")
+    print(f"\n[infer] Outputs saved:")
     print(f"  Per-day report : {OUTPUT_DAILY}")
     print(f"  User report    : {OUTPUT_USERS}")
     print(f"  SHAP values    : {OUTPUT_SHAP}")
