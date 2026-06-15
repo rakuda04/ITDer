@@ -821,9 +821,7 @@ function App() {
                   if (+row.after_hours_session_count > 0) {
                     flags.push(<span key="ah" className="flag-pill pill-amber" style={{marginRight: 4}}>After-hours login</span>);
                   }
-                  if (+row.usb_count > 0) {
-                    flags.push(<span key="u" className="flag-pill pill-amber" style={{marginRight: 4}}>Used USB</span>);
-                  }
+
                   if (+row.usb_after_hours_flag) flags.push(<span key="uah" className="flag-pill pill-red" style={{marginRight: 4}}>USB after-hours</span>);
                   if (+row.job_site_visits_flag) flags.push(<span key="js" className="flag-pill pill-amber" style={{marginRight: 4}}>Job site visit</span>);
                   if (+row.weekend_session_flag) flags.push(<span key="ws" className="flag-pill pill-amber" style={{marginRight: 4}}>Weekend session</span>);

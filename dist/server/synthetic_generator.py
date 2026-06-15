@@ -192,6 +192,13 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
     
     if is_weekend:
         row['weekend_session_flag'] = int(rng.random() < 0.03)  # ~3% of weekend days
+        if row['weekend_session_flag'] == 0:
+            row['job_site_visits_flag'] = 0
+            row['after_hours_session_count'] = 0
+            row['usb_count'] = 0
+            row['usb_after_hours_flag'] = 0
+            row['usb_on_weekend_flag'] = 0
+            row['usb_device_diversity_monthly'] = 0
     else:
         row['weekend_session_flag'] = 0
 
