@@ -36,16 +36,21 @@ FEATURES_CSV = OUTPUT_DIR / "local_model_intake.csv"
 
 
 def run():
-    missing = [p for p in [DAILY_CSV, USERS_CSV, FEATURES_CSV] if not p.exists()]
-    if missing:
-        print(f"[server] Missing output files: {[str(p) for p in missing]}")
+    if not FEATURES_CSV.exists():
+        print(f"[server] Missing output features file: {FEATURES_CSV}")
         print("[server] Run the pipeline first.")
         sys.exit(1)
 
     print("[server] Loading CSVs...")
     features  = pd.read_csv(FEATURES_CSV).fillna("").to_dict(orient="records")
-    scores    = pd.read_csv(DAILY_CSV).fillna("").to_dict(orient="records")
-    user_risk = pd.read_csv(USERS_CSV).fillna("").to_dict(orient="records")
+    
+    scores = []
+    if DAILY_CSV.exists():
+        scores = pd.read_csv(DAILY_CSV).fillna("").to_dict(orient="records")
+        
+    user_risk = []
+    if USERS_CSV.exists():
+        user_risk = pd.read_csv(USERS_CSV).fillna("").to_dict(orient="records")
 
     payload = {
         "hostname":        socket.gethostname(),
@@ -54,6 +59,7 @@ def run():
         "scores":          scores,
         "user_risk":       user_risk,
     }
+
 
     print(f"[server] Posting to {ENDPOINT}...")
     try:
