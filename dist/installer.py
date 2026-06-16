@@ -36,14 +36,28 @@ DEPS = [
 RUNNER_SCRIPT = """\
 import subprocess, sys, os
 from datetime import datetime
+import urllib.request
+import json
 
 os.chdir(r"{install_dir}")
 log_file = r"{install_dir}\\pipeline.log"
+api_url = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com").rstrip("/") + "/api/telemetry"
 
 def log(msg):
     with open(log_file, "a") as f:
         f.write(f"[{{datetime.now()}}] {{msg}}\\n")
     print(msg)
+    try:
+        req = urllib.request.Request(
+            api_url,
+            data=json.dumps({{"source": "agent", "message": msg}}).encode("utf-8"),
+            headers={{"Content-Type": "application/json"}},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=2):
+            pass
+    except Exception:
+        pass
 
 log("Pipeline started")
 scripts = [

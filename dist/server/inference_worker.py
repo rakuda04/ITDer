@@ -42,9 +42,23 @@ DB_CONFIG = {
 
 # ── logging ──────────────────────────────────────────────────
 
+import urllib.request
+import json
+
 def log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] [worker] {msg}", flush=True)
+    try:
+        req = urllib.request.Request(
+            "http://api:8000/api/telemetry",
+            data=json.dumps({"source": "worker", "message": msg}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=2):
+            pass
+    except Exception:
+        pass
 
 
 def fail(msg):
@@ -383,19 +397,57 @@ def _fail_pipeline_run(run_id):
     finally:
         conn.close()
 
+class StdoutRedirector:
+    def __init__(self, original_stdout):
+        self.original_stdout = original_stdout
+        self.buffer = ""
+    def write(self, msg):
+        self.original_stdout.write(msg)
+        self.buffer += msg
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            line = line.strip()
+            # Avoid infinite loop if the log function calls print
+            # But our log function calls print("[worker]..."), so we skip those
+            if line and not line.startswith("[worker]"):
+                # Call urllib directly to avoid recursive print calls
+                try:
+                    import urllib.request, json
+                    req = urllib.request.Request(
+                        "http://api:8000/api/telemetry",
+                        data=json.dumps({"source": "worker", "message": line}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=2):
+                        pass
+                except Exception:
+                    pass
+    def flush(self):
+        self.original_stdout.flush()
+
 def run_job(payload=None, run_id=None):
     log("=" * 50)
     log("Inference worker started")
     log("=" * 50)
     my_run_id = run_id
+    old_stdout = sys.stdout
     try:
         if not my_run_id:
             my_run_id = _start_pipeline_run()
-        features_df                      = pull_features()
-        daily_df, user_report, shap_df   = run_inference(features_df, payload)
+        features_df = pull_features()
+        
+        sys.stdout = StdoutRedirector(old_stdout)
+        try:
+            daily_df, user_report, shap_df = run_inference(features_df, payload)
+        finally:
+            sys.stdout = old_stdout
+            
+        log("Displaying to dashboard...")
         write_scores(my_run_id, daily_df, user_report, shap_df)
         log("Worker finished successfully.")
     except Exception as e:
+        sys.stdout = old_stdout
         log(f"Worker failed: {e}")
         _fail_pipeline_run(my_run_id)
         traceback.print_exc()

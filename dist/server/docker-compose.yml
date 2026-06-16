@@ -86,6 +86,15 @@ services:
       postgres:
         condition: service_healthy
 
+  telemetry:
+    build:
+      context: https://github.com/rakuda04/ITDer.git#main:dist/server
+      dockerfile: Dockerfile.telemetry
+    container_name: itder_telemetry
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: itder_cloudflared
