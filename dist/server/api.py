@@ -44,6 +44,22 @@ def _query(sql, params=None):
         conn.close()
 
 
+def _init_db():
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key VARCHAR PRIMARY KEY,
+                    value JSONB
+                )
+            """)
+        conn.commit()
+    except Exception as e:
+        print(f"Error initializing DB: {e}")
+    finally:
+        conn.close()
+
 # ── routes ────────────────────────────────────────────────────
 
 @app.route("/")
@@ -203,19 +219,55 @@ def shap():
     return jsonify(rows)
 
 
-@app.route("/api/schedule", methods=["GET"])
-def get_schedule():
-    return jsonify({
-        "enabled": os.getenv("ITDER_SCHEDULE", "0") == "1",
-        "cron":    os.getenv("ITDER_CRON", "0 2 * * *"),
-    })
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    conn = _connect()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT key, value FROM system_settings")
+            rows = cur.fetchall()
+            settings = {r["key"]: r["value"] for r in rows}
+            return jsonify(settings)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 
-@app.route("/api/schedule", methods=["POST"])
-def set_schedule():
-    # Schedule is configured via env vars in docker-compose.yml
-    # This endpoint exists so the frontend doesn't 404
-    return jsonify({"ok": True, "msg": "Schedule is configured via ITDER_SCHEDULE and ITDER_CRON env vars"})
+@app.route("/api/settings", methods=["POST"])
+def set_settings():
+    payload = request.get_json(silent=True) or {}
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            for k, v in payload.items():
+                # Convert python objects to json string for JSONB column
+                json_v = json.dumps(v)
+                cur.execute("""
+                    INSERT INTO system_settings (key, value)
+                    VALUES (%s, %s::jsonb)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """, (k, json_v))
+        conn.commit()
+        
+        # Fire webhook to worker if schedule settings changed
+        if "schedule_enabled" in payload or "schedule_cron" in payload:
+            try:
+                req = urllib.request.Request(
+                    f"{WORKER_URL}/reload_schedule",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=5):
+                    pass
+            except Exception as e:
+                print(f"Failed to notify worker of schedule change: {e}")
+                
+        return jsonify({"ok": True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/status")
@@ -295,4 +347,5 @@ def _trigger_worker(payload=None):
 
 
 if __name__ == "__main__":
+    _init_db()
     app.run(host="0.0.0.0", port=5000, debug=False)

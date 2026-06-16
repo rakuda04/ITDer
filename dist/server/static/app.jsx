@@ -41,7 +41,7 @@ function useApi(url, refresh = 0) {
   const [error, setError]     = useState(null);
   useEffect(() => {
     setLoading(true);
-    fetch(url)
+    fetch(url, { cache: 'no-store' })
       .then((r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); })
       .then((d) => { setData(d); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
@@ -230,16 +230,21 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
   const [schedMin, setSchedMin]     = React.useState(0);
   const [schedSaving, setSchedSaving] = React.useState(false);
   const [resetting, setResetting] = React.useState(false);
+  const [saveLog, setSaveLog] = React.useState(null);
 
   // Load current schedule on open
   React.useEffect(() => {
-    fetch('/api/schedule')
+    fetch('/api/settings')
       .then(r => r.json())
       .then(d => {
-        if (d.enabled) {
+        if (d.schedule_enabled) {
           setMode('scheduled');
-          setSchedHour(d.hour ?? 2);
-          setSchedMin(d.minute ?? 0);
+          // Parse hour/minute from cron if possible
+          const cronParts = (d.schedule_cron || "0 2 * * *").split(' ');
+          if (cronParts.length >= 2) {
+            setSchedMin(parseInt(cronParts[0]) || 0);
+            setSchedHour(parseInt(cronParts[1]) || 2);
+          }
         }
       })
       .catch(() => {});
@@ -250,6 +255,18 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
     setResetting(false);
     setLog(null);
     try {
+      // First, save the current configuration to the database
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schedule_enabled: mode === 'scheduled',
+          schedule_cron: `${schedMin} ${schedHour} * * *`,
+          synthCfg: synthCfg,
+          inferCfg: inferCfg
+        }),
+      });
+
       const payload = { ...inferCfg, ...synthCfg };
       const r = await fetch(`/api/run/${endpoint}`, {
         method: 'POST',
@@ -290,23 +307,24 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
     }
   };
 
-  const saveSchedule = async () => {
+  const saveSettings = async () => {
     setSchedSaving(true);
-    setLog(null);
+    setSaveLog(null);
     try {
-      const r = await fetch('/api/schedule', {
+      const r = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enabled: mode === 'scheduled',
-          hour: schedHour,
-          minute: schedMin,
+          schedule_enabled: mode === 'scheduled',
+          schedule_cron: `${schedMin} ${schedHour} * * *`,
+          synthCfg: synthCfg,
+          inferCfg: inferCfg
         }),
       });
       const d = await r.json();
-      setLog({ ok: d.ok, text: d.ok ? '✓ Schedule saved' : (d.error || 'Error saving schedule') });
+      setSaveLog({ ok: d.ok, text: d.ok ? '✓ Settings saved to database' : (d.error || 'Error saving settings') });
     } catch(e) {
-      setLog({ ok: false, text: String(e) });
+      setSaveLog({ ok: false, text: String(e) });
     }
     setSchedSaving(false);
   };
@@ -359,16 +377,21 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
               </div>
               <div className="settings-row">
                 <label>Minute</label>
-                <Stepper value={schedMin} min={0} max={59} step={5}
+                <Stepper value={schedMin} min={0} max={59} step={1}
                   onChange={v => setSchedMin(v)} />
               </div>
               <div className="settings-note">
                 Runs daily at {padZ(schedHour)}:{padZ(schedMin)} UTC
               </div>
               <button className="settings-run" disabled={schedSaving}
-                onClick={saveSchedule}>
+                onClick={saveSettings}>
                 {schedSaving ? 'Saving…' : 'Save schedule'}
               </button>
+              {saveLog && (
+                <div className={`settings-log ${saveLog.ok ? 'ok' : 'err'}`} style={{ margin: '10px 0 0 0', boxSizing: 'border-box', textAlign: 'center' }}>
+                  {saveLog.text}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -425,10 +448,10 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
               style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: 'bold', background: resetting ? '#224422' : 'transparent', border: resetting ? '1px solid #44cc44' : '1px solid #4a4a5a', color: resetting ? '#44cc44' : '#a0a0b0', transition: 'all 0.2s' }}>
               {resetting ? '✓ Reset' : 'Reset Default'}
             </button>
-            <button className="settings-run" disabled={!!running}
+            <button className="settings-run" disabled={!!running || mode === 'scheduled'}
               onClick={() => run('inference')}
-              style={{ flex: 2, padding: '12px', fontSize: '14px', fontWeight: 'bold' }}>
-              {running ? 'Pipeline running in background…' : 'Save & Run Pipeline'}
+              style={{ flex: 1.5, padding: '12px', fontSize: '14px', fontWeight: 'bold', opacity: mode === 'scheduled' ? 0.5 : 1 }}>
+              {running ? 'Running…' : 'Save & Run Pipeline'}
             </button>
           </div>
         </div>
@@ -564,9 +587,39 @@ function App() {
   const [dark, setDark] = useState(getInitialDark);
   const [showSettings, setShowSettings] = useState(false);
 
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(d => {
+        if (d.synthCfg) setSynthCfg(d.synthCfg);
+        if (d.inferCfg) setInferCfg(d.inferCfg);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => { applyTheme(dark); }, [dark]);
   const reloadData = () => setRefresh(r => r + 1);
   const toggleTheme = () => setDark((d) => !d);
+
+  // Automatically refresh data when any background run finishes
+  useEffect(() => {
+    let wasRunning = false;
+    const evt = new EventSource('/api/status_stream');
+    evt.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.pipeline_status === 'running') {
+          wasRunning = true;
+        } else if (data.pipeline_status === 'success') {
+          if (wasRunning) {
+            reloadData();
+            wasRunning = false;
+          }
+        }
+      } catch(err) {}
+    };
+    return () => evt.close();
+  }, []);
 
   useEffect(() => {
     if (usersData.length && !sel) setSel(usersData[0].user);
