@@ -21,16 +21,14 @@ sys.dont_write_bytecode = True
 SCRIPT_DIR   = Path(__file__).resolve().parent
 FEATURES_CSV = SCRIPT_DIR / "output" / "local_model_intake.csv"
 
-# Read api_url.txt if it exists, otherwise fall back to environment variable or default
+# Read api_url.txt if it exists, otherwise nothing happens
 API_URL = "https://your-tunnel.yourdomain.com"
 api_url_file = SCRIPT_DIR / "api_url.txt"
 if api_url_file.exists():
     try:
         API_URL = api_url_file.read_text().strip()
     except Exception:
-        API_URL = os.getenv("ITDER_API_URL", API_URL)
-else:
-    API_URL = os.getenv("ITDER_API_URL", API_URL)
+        pass
 
 ENDPOINT = f"{API_URL.rstrip('/')}/ingest"
 

@@ -16,7 +16,6 @@ from tkinter import messagebox, simpledialog
 # ── config ───────────────────────────────────────────────────
 REPO_BASE    = "https://raw.githubusercontent.com/rakuda04/ITDer/main/dist/local"
 INSTALL_DIR  = r"C:\ProgramData\itder"
-SILENT_MODE  = False
 
 FILES = [
     "config.py",
@@ -44,16 +43,16 @@ import json
 os.chdir(r"{install_dir}")
 log_file = r"{install_dir}\\pipeline.log"
 
-# Read api_url.txt if it exists, otherwise fall back to environment variable
+# Read api_url.txt if it exists, otherwise fall back to default
 api_url_file = r"{install_dir}\\api_url.txt"
 if os.path.exists(api_url_file):
     try:
         with open(api_url_file, "r") as f:
             api_url = f.read().strip()
     except Exception:
-        api_url = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com")
+        api_url = "https://your-tunnel.yourdomain.com"
 else:
-    api_url = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com")
+    api_url = "https://your-tunnel.yourdomain.com"
 
 api_url = api_url.rstrip("/") + "/api/telemetry"
 
@@ -111,8 +110,7 @@ def log(msg):
 
 def fail(msg):
     log(f"ERROR: {msg}")
-    if not SILENT_MODE:
-        messagebox.showerror("ITDer Installer", f"Installation failed:\n\n{msg}")
+    messagebox.showerror("ITDer Installer", f"Installation failed:\n\n{msg}")
     sys.exit(1)
 
 
@@ -276,18 +274,16 @@ def install_dependencies(python_exe):
     log("Dependencies installed.")
 
 
-def set_env_variables(api_url):
+def set_env_variables():
     log("Setting system environment variables...")
     key = winreg.OpenKey(
         winreg.HKEY_LOCAL_MACHINE,
         r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
         0, winreg.KEY_SET_VALUE
     )
-    winreg.SetValueEx(key, "ITDER_API_URL", 0, winreg.REG_SZ, api_url)
     winreg.SetValueEx(key, "PYTHONUTF8",    0, winreg.REG_SZ, "1")
     winreg.CloseKey(key)
     ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x1A, 0, "Environment", 0x0002, 5000, None)
-    log(f"ITDER_API_URL = {api_url}")
     log("PYTHONUTF8 = 1")
 
 
@@ -364,49 +360,7 @@ def save_api_url_file(api_url):
         log(f"Warning: Could not save API URL file: {e}")
 
 
-def get_configured_api_url():
-    # 1. Check command-line arguments (e.g. --api-url <url>, -url <url>, -u <url>)
-    # Also support old behavior where any argument starting with http:// or https:// is the URL.
-    for i, arg in enumerate(sys.argv):
-        if arg in ["--api-url", "-u", "--url", "-url"] and i + 1 < len(sys.argv):
-            return sys.argv[i + 1].strip()
-        if arg.startswith("http://") or arg.startswith("https://"):
-            return arg.strip()
-
-    # 2. Check local config file 'itder_api_url.txt' or 'api_url.txt' in installer's folder or current directory
-    if getattr(sys, 'frozen', False):
-        base_dir = os.path.dirname(sys.executable)
-    else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    config_file_paths = [
-        os.path.join(base_dir, "itder_api_url.txt"),
-        os.path.join(base_dir, "api_url.txt"),
-        os.path.join(os.getcwd(), "itder_api_url.txt"),
-        os.path.join(os.getcwd(), "api_url.txt")
-    ]
-    for path in config_file_paths:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    url = f.read().strip()
-                    if url.startswith("http://") or url.startswith("https://"):
-                        log(f"Found API URL in configuration file ({os.path.basename(path)}): {url}")
-                        return url
-            except Exception as e:
-                log(f"Warning: Failed to read configuration file {path}: {e}")
-
-    # 3. Check environment variable
-    env_url = os.environ.get("ITDER_API_URL")
-    if env_url and (env_url.startswith("http://") or env_url.startswith("https://")):
-        log(f"Found API URL in environment: {env_url}")
-        return env_url.strip()
-
-    return None
-
-
 def main():
-    global SILENT_MODE
     # auto-elevate — triggers UAC prompt on double-click
     if not is_admin():
         script = os.path.abspath(sys.argv[0])
@@ -425,24 +379,19 @@ def main():
     except Exception:
         pass
 
-    # Check for configured API URL
-    api_url = get_configured_api_url()
-    if api_url:
-        SILENT_MODE = True
-    else:
-        root = tk.Tk()
-        root.withdraw()
+    root = tk.Tk()
+    root.withdraw()
 
-        api_url = simpledialog.askstring(
-            "ITDer Installer",
-            "Enter the ITDer API URL:",
-            initialvalue="http://localhost:8000",
-            parent=root
-        )
-        if not api_url or api_url.strip() in ["http://", "https://"]:
-            messagebox.showwarning("ITDer Installer", "No API URL entered. Installation cancelled.")
-            sys.exit(0)
-        api_url = api_url.strip()
+    api_url = simpledialog.askstring(
+        "ITDer Installer",
+        "Enter the ITDer API URL:",
+        initialvalue="http://localhost:8000",
+        parent=root
+    )
+    if not api_url or api_url.strip() in ["http://", "https://"]:
+        messagebox.showwarning("ITDer Installer", "No API URL entered. Installation cancelled.")
+        sys.exit(0)
+    api_url = api_url.strip()
 
     try:
         python_exe = check_python()
@@ -451,7 +400,7 @@ def main():
         save_api_url_file(api_url)
         download_files()
         install_dependencies(python_exe)
-        set_env_variables(api_url)
+        set_env_variables()
         create_runner()
         register_startup(python_exe)
     except SystemExit:
@@ -459,16 +408,11 @@ def main():
     except Exception as e:
         fail(str(e))
 
-    if SILENT_MODE:
-        log("Installation complete successfully!")
-        log("The pipeline will run automatically on next startup.")
-        log(f"To test now, run:\npython {INSTALL_DIR}\\run_pipeline.py")
-    else:
-        messagebox.showinfo(
-            "ITDer Installer",
-            "Installation complete!\n\nThe pipeline will run automatically on next startup.\n\n"
-            f"To test now, run:\npython {INSTALL_DIR}\\run_pipeline.py"
-        )
+    messagebox.showinfo(
+        "ITDer Installer",
+        "Installation complete!\n\nThe pipeline will run automatically on next startup.\n\n"
+        f"To test now, run:\npython {INSTALL_DIR}\\run_pipeline.py"
+    )
 
 
 
