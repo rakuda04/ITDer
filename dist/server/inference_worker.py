@@ -5,7 +5,6 @@ Pulls daily_features from Postgres, runs synthetic generation
 and inference, then writes scores back to daily_scores and user_risk.
 
 Schedule (disabled by default):
-    Set ITDER_SCHEDULE=1 in environment to enable.
     Set ITDER_CRON="0 2 * * *" to customize (default: daily at 02:00 UTC).
 """
 
@@ -42,9 +41,23 @@ DB_CONFIG = {
 
 # ── logging ──────────────────────────────────────────────────
 
+import urllib.request
+import json
+
 def log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] [worker] {msg}", flush=True)
+    try:
+        req = urllib.request.Request(
+            "http://api:8000/api/telemetry",
+            data=json.dumps({"source": "worker", "message": msg}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=2):
+            pass
+    except Exception:
+        pass
 
 
 def fail(msg):
@@ -383,19 +396,76 @@ def _fail_pipeline_run(run_id):
     finally:
         conn.close()
 
+class StdoutRedirector:
+    def __init__(self, original_stdout):
+        self.original_stdout = original_stdout
+        self.buffer = ""
+    def write(self, msg):
+        self.original_stdout.write(msg)
+        self.buffer += msg
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            line = line.strip()
+            # Avoid infinite loop if the log function calls print
+            # But our log function calls print("[worker]..."), so we skip those
+            if line and not line.startswith("[worker]"):
+                # Call urllib directly to avoid recursive print calls
+                try:
+                    import urllib.request, json
+                    req = urllib.request.Request(
+                        "http://api:8000/api/telemetry",
+                        data=json.dumps({"source": "worker", "message": line}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=2):
+                        pass
+                except Exception:
+                    pass
+    def flush(self):
+        self.original_stdout.flush()
+
 def run_job(payload=None, run_id=None):
     log("=" * 50)
     log("Inference worker started")
     log("=" * 50)
     my_run_id = run_id
+    old_stdout = sys.stdout
+    
+    if payload is None:
+        payload = {}
+        
+    # Read settings from database and override payload
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM system_settings WHERE key IN ('synthCfg', 'inferCfg')")
+            for key, val_dict in cur.fetchall():
+                try:
+                    if isinstance(val_dict, dict):
+                        payload.update(val_dict)
+                except Exception as ex:
+                    log(f"Failed to parse payload config {key}: {ex}")
+        conn.close()
+    except Exception as e:
+        log(f"Warning: could not read system settings: {e}")
+
     try:
         if not my_run_id:
             my_run_id = _start_pipeline_run()
-        features_df                      = pull_features()
-        daily_df, user_report, shap_df   = run_inference(features_df, payload)
+        features_df = pull_features()
+        
+        sys.stdout = StdoutRedirector(old_stdout)
+        try:
+            daily_df, user_report, shap_df = run_inference(features_df, payload)
+        finally:
+            sys.stdout = old_stdout
+            
+        log("Displaying to dashboard...")
         write_scores(my_run_id, daily_df, user_report, shap_df)
         log("Worker finished successfully.")
     except Exception as e:
+        sys.stdout = old_stdout
         log(f"Worker failed: {e}")
         _fail_pipeline_run(my_run_id)
         traceback.print_exc()
@@ -440,27 +510,63 @@ def http_health():
     return _jsonify({"status": "ok"})
 
 
+# ── dynamic scheduler ───────────────────────────────────────────
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+_global_scheduler = BackgroundScheduler(timezone="UTC")
+_global_scheduler.start()
+
+def _apply_schedule_from_db():
+    conn = _connect()
+    enabled = False
+    cron = "0 2 * * *"
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM system_settings WHERE key IN ('schedule_enabled', 'schedule_cron')")
+            for k, val in cur.fetchall():
+                try:
+                    if k == 'schedule_enabled': enabled = bool(val)
+                    if k == 'schedule_cron': cron = str(val)
+                except Exception as ex:
+                    log(f"Failed to parse {k}: {ex}")
+    except Exception as e:
+        log(f"Warning: could not read schedule settings: {e}")
+    finally:
+        conn.close()
+
+    try:
+        # Always remove existing job if it exists to replace it cleanly
+        if _global_scheduler.get_job('pipeline_job'):
+            _global_scheduler.remove_job('pipeline_job')
+            
+        if enabled:
+            parts = cron.split()
+            if len(parts) == 5:
+                trigger = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
+                                     month=parts[3], day_of_week=parts[4])
+                _global_scheduler.add_job(run_job, trigger, id='pipeline_job')
+                log(f"Scheduler dynamically updated — cron: '{cron}' (UTC)")
+            else:
+                log(f"Invalid cron expression from DB: '{cron}'")
+        else:
+            log("Scheduler is disabled in DB settings")
+    except Exception as e:
+        log(f"Failed to apply schedule: {e}")
+
+@_flask_app.route("/reload_schedule", methods=["POST"])
+def http_reload_schedule():
+    _apply_schedule_from_db()
+    return _jsonify({"ok": True, "msg": "schedule reloaded"})
+
 # ── entry point ───────────────────────────────────────────────
 
 if __name__ == "__main__":
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    if SCHEDULE_ENABLED:
-        from apscheduler.schedulers.background import BackgroundScheduler
-        from apscheduler.triggers.cron import CronTrigger
-
-        parts = SCHEDULE_CRON.split()
-        if len(parts) != 5:
-            fail(f"Invalid ITDER_CRON '{SCHEDULE_CRON}'. Expected: 'min hour dom month dow'")
-
-        trigger   = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2],
-                                 month=parts[3], day_of_week=parts[4])
-        scheduler = BackgroundScheduler(timezone="UTC")
-        scheduler.add_job(run_job, trigger)
-        scheduler.start()
-        log(f"Scheduler enabled — cron: '{SCHEDULE_CRON}' (UTC)")
-    else:
-        log("Scheduler disabled — manual trigger only via HTTP")
+    # Initial apply on startup
+    _apply_schedule_from_db()
 
     log("Worker HTTP server starting on port 8001")
     _flask_app.run(host="0.0.0.0", port=8001, debug=False)

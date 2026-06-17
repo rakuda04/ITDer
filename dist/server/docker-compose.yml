@@ -1,7 +1,7 @@
 services:
   postgres:
     build:
-      context: https://github.com/rakuda04/ITDer.git#main:dist/server
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.postgres
     container_name: itder_postgres
     restart: unless-stopped
@@ -19,7 +19,7 @@ services:
 
   pgadmin:
     build:
-      context: https://github.com/rakuda04/ITDer.git#main:dist/server
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.pgadmin
     container_name: itder_pgadmin
     restart: unless-stopped
@@ -34,7 +34,7 @@ services:
 
   api:
     build:
-      context: https://github.com/rakuda04/ITDer.git#main:dist/server
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.api
     container_name: itder_api
     restart: unless-stopped
@@ -52,7 +52,7 @@ services:
 
   worker:
     build:
-      context: https://github.com/rakuda04/ITDer.git#main:dist/server
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.worker
     container_name: itder_worker
     restart: unless-stopped
@@ -70,7 +70,7 @@ services:
 
   dashboard:
     build:
-      context: https://github.com/rakuda04/ITDer.git#main:dist/server
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.dashboard
     container_name: itder_dashboard
     restart: unless-stopped
@@ -85,6 +85,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  telemetry:
+    build:
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
+      dockerfile: Dockerfile.telemetry
+    container_name: itder_telemetry
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
 
   cloudflared:
     image: cloudflare/cloudflared:latest

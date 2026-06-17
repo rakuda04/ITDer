@@ -40,7 +40,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-# Force UTF-8 output so Unicode characters (→, ✅, —) print correctly
+# Force UTF-8 output so Unicode characters (→, —) print correctly
 # on Windows, whose console defaults to cp1252.
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -395,7 +395,7 @@ def generate(output_path: Path = OUTPUT_PATH, cfg_override=None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(output_path, index=False)
 
-    print(f"\n[synthetic] ✅ {len(combined)} rows → {output_path}")
+    print(f"\n[synthetic]  {len(combined)} rows → {output_path}")
     print(f"  Normal users  : {N_NORMAL_USERS} × {N_DAYS} = {N_NORMAL_USERS * N_DAYS} rows")
     print(f"  Insider users : {len(insider_df['user'].unique())} × {N_DAYS} = {len(insider_df)} rows")
     return combined

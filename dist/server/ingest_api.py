@@ -16,9 +16,13 @@ from datetime import datetime, timezone
 
 import psycopg2
 from psycopg2.extras import execute_values
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
+from flask_cors import CORS
+import json
+import time
 
 app = Flask(__name__)
+CORS(app)
 
 DB_CONFIG = {
     "host":     os.getenv("POSTGRES_HOST",     "postgres"),
@@ -237,6 +241,9 @@ def ingest():
                 _close_run(cur, run_id, "success", inserted=total)
 
         conn.close()
+        timestamp = time.strftime("%H:%M:%S")
+        SYSTEM_LOGS.append({"timestamp": timestamp, "source": "api", "message": f"Ingested {total} rows from {hostname}"})
+        if len(SYSTEM_LOGS) > 1000: SYSTEM_LOGS.pop(0)
         return jsonify({"status": "ok", "run_id": run_id, "rows_inserted": total})
 
     except Exception as e:
@@ -250,6 +257,36 @@ def ingest():
                 pass
         return jsonify({"error": str(e)}), 500
 
+SYSTEM_LOGS = []
+
+@app.route("/api/telemetry", methods=["POST"])
+def post_telemetry():
+    payload = request.get_json(silent=True) or {}
+    msg = payload.get("message", "")
+    source = payload.get("source", "unknown")
+    if msg:
+        timestamp = time.strftime("%H:%M:%S")
+        SYSTEM_LOGS.append({"timestamp": timestamp, "source": source, "message": msg})
+        if len(SYSTEM_LOGS) > 1000:
+            SYSTEM_LOGS.pop(0)
+    return jsonify({"ok": True})
+
+@app.route("/api/telemetry_stream")
+def telemetry_stream():
+    def generate():
+        last_idx = max(0, len(SYSTEM_LOGS) - 50)
+        yield f"data: {json.dumps(SYSTEM_LOGS[last_idx:])}\n\n"
+        last_idx = len(SYSTEM_LOGS)
+        while True:
+            current_len = len(SYSTEM_LOGS)
+            if current_len > last_idx:
+                new_logs = SYSTEM_LOGS[last_idx:current_len]
+                yield f"data: {json.dumps(new_logs)}\n\n"
+                last_idx = current_len
+            elif current_len < last_idx:
+                last_idx = len(SYSTEM_LOGS)
+            time.sleep(0.5)
+    return Response(generate(), mimetype="text/event-stream")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=False)

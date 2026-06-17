@@ -7,7 +7,7 @@
 #
 # Stages:
 #   Stage 1 — RF supervised (CERT-trained weights, no retraining)
-#   Stage 2 — IsoForest (scored against combined population)
+#   Stage 2 — IsoForest (scored against  population)
 #   Stage 3 — Elliptic Envelope (fitted on local population)
 #   Stage 4 — Combined risk score + SHAP explanations
 #
@@ -68,7 +68,7 @@ OUTPUT_SHAP      = OUTPUT_DIR / "local_shap_values.csv"
 
 # ── config ───────────────────────────────────────────────────
 CONFIG = {
-    'weight_supervised':        0.5,   # RF retrained on 100-user CERT subset — re-enabled
+    'weight_supervised':        0.5,  
     'weight_unsupervised':      0.5,
     'shap_days_per_user':       3,
     # Composite ranking weights — must sum to 1.0
@@ -114,9 +114,7 @@ def _load_thresholds():
             print(f"[infer] WARNING: '{key}' missing from cert_thresholds.json. "
                   f"Re-run model_training.py to regenerate thresholds with score ranges.")
 
-    # Override threshold: RF is disabled so the CERT p98 combined threshold is
-    # meaningless. Use unsupervised-only p95 derived from synthetic normal population.
-
+    
     return t
 
 
