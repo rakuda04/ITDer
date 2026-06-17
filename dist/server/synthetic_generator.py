@@ -40,7 +40,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-# Force UTF-8 output so Unicode characters (→, ✅, —) print correctly
+# Force UTF-8 output so Unicode characters (→, —) print correctly
 # on Windows, whose console defaults to cp1252.
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
