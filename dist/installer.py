@@ -43,7 +43,19 @@ import json
 
 os.chdir(r"{install_dir}")
 log_file = r"{install_dir}\\pipeline.log"
-api_url = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com").rstrip("/") + "/api/telemetry"
+
+# Read api_url.txt if it exists, otherwise fall back to environment variable
+api_url_file = r"{install_dir}\\api_url.txt"
+if os.path.exists(api_url_file):
+    try:
+        with open(api_url_file, "r") as f:
+            api_url = f.read().strip()
+    except Exception:
+        api_url = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com")
+else:
+    api_url = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com")
+
+api_url = api_url.rstrip("/") + "/api/telemetry"
 
 def log(msg):
     with open(log_file, "a") as f:
@@ -341,6 +353,58 @@ def register_startup(python_exe):
 
 
 
+def save_api_url_file(api_url):
+    log("Saving API URL to api_url.txt...")
+    config_path = os.path.join(INSTALL_DIR, "api_url.txt")
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(api_url.strip())
+        log(f"Saved API URL to {config_path}")
+    except Exception as e:
+        log(f"Warning: Could not save API URL file: {e}")
+
+
+def get_configured_api_url():
+    # 1. Check command-line arguments (e.g. --api-url <url>, -url <url>, -u <url>)
+    # Also support old behavior where any argument starting with http:// or https:// is the URL.
+    for i, arg in enumerate(sys.argv):
+        if arg in ["--api-url", "-u", "--url", "-url"] and i + 1 < len(sys.argv):
+            return sys.argv[i + 1].strip()
+        if arg.startswith("http://") or arg.startswith("https://"):
+            return arg.strip()
+
+    # 2. Check local config file 'itder_api_url.txt' or 'api_url.txt' in installer's folder or current directory
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    config_file_paths = [
+        os.path.join(base_dir, "itder_api_url.txt"),
+        os.path.join(base_dir, "api_url.txt"),
+        os.path.join(os.getcwd(), "itder_api_url.txt"),
+        os.path.join(os.getcwd(), "api_url.txt")
+    ]
+    for path in config_file_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    url = f.read().strip()
+                    if url.startswith("http://") or url.startswith("https://"):
+                        log(f"Found API URL in configuration file ({os.path.basename(path)}): {url}")
+                        return url
+            except Exception as e:
+                log(f"Warning: Failed to read configuration file {path}: {e}")
+
+    # 3. Check environment variable
+    env_url = os.environ.get("ITDER_API_URL")
+    if env_url and (env_url.startswith("http://") or env_url.startswith("https://")):
+        log(f"Found API URL in environment: {env_url}")
+        return env_url.strip()
+
+    return None
+
+
 def main():
     global SILENT_MODE
     # auto-elevate — triggers UAC prompt on double-click
@@ -361,16 +425,11 @@ def main():
     except Exception:
         pass
 
-
-    # Check for CLI arguments for silent/non-interactive install
-    api_url = None
-    for arg in sys.argv[1:]:
-        if arg.startswith("http://") or arg.startswith("https://"):
-            api_url = arg.strip()
-            SILENT_MODE = True
-            break
-
-    if not api_url:
+    # Check for configured API URL
+    api_url = get_configured_api_url()
+    if api_url:
+        SILENT_MODE = True
+    else:
         root = tk.Tk()
         root.withdraw()
 
@@ -389,6 +448,7 @@ def main():
         python_exe = check_python()
         enable_audit_policies()
         create_directories()
+        save_api_url_file(api_url)
         download_files()
         install_dependencies(python_exe)
         set_env_variables(api_url)

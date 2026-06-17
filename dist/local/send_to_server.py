@@ -18,11 +18,21 @@ import requests
 
 sys.dont_write_bytecode = True
 
-API_URL  = os.getenv("ITDER_API_URL", "https://your-tunnel.yourdomain.com")
-ENDPOINT = f"{API_URL.rstrip('/')}/ingest"
-
 SCRIPT_DIR   = Path(__file__).resolve().parent
 FEATURES_CSV = SCRIPT_DIR / "output" / "local_model_intake.csv"
+
+# Read api_url.txt if it exists, otherwise fall back to environment variable or default
+API_URL = "https://your-tunnel.yourdomain.com"
+api_url_file = SCRIPT_DIR / "api_url.txt"
+if api_url_file.exists():
+    try:
+        API_URL = api_url_file.read_text().strip()
+    except Exception:
+        API_URL = os.getenv("ITDER_API_URL", API_URL)
+else:
+    API_URL = os.getenv("ITDER_API_URL", API_URL)
+
+ENDPOINT = f"{API_URL.rstrip('/')}/ingest"
 
 
 def run():
