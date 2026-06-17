@@ -117,7 +117,7 @@ def get_security_events(days: int = config.DAYS_BACK) -> list[dict]:
 
             results.append({
                 "timestamp": ts,
-                "source":    log_path,          # "Security" or "System"
+                "source":    log_path,         
                 "event_id":  eid,
                 "activity":  cfg["labels"].get(eid, "OTHER"),
                 "user":      os.environ.get("USERNAME") or os.getlogin() or "unknown",
