@@ -64,12 +64,12 @@ graph TD
 
 ## Server Environment
 
-1. Download 'docker-compose.yml' from `dist/server` directory.
+1. `git clone` the repository and run the docker-compose.yml` from `dist/server` directory.
 
 2. Run the server environment using Docker Compose:
 
    ```bash
-   "COMPOSE_BAKE=false" && docker compose up -d --build
+   set "COMPOSE_BAKE=false" && docker compose up -d --build
    ```
 
 3. Access the dashboard via your browser at:
