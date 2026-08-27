@@ -103,3 +103,16 @@ graph TD
 ## Limitations
 - The supervised model (Random Forest) uses fixed weights from CERT training and is not retrained or fine-tuned on local data.
 - Local scoring is validated against a synthetic population, not real labeled local users actual detection accuracy on genuine insider behavior is untested (due to lack of data availability).
+
+## Citation
+
+```bibtex
+@misc{cert_insider_threat_v4_2,
+  author       = {Lindauer, Brian and Glasser, Joshua and Wall, Christian},
+  title        = {{CERT Synthetic Insider Threat Test Dataset, Version 4.2}},
+  howpublished = {\url{https://www.sei.cmu.edu/}},
+  publisher    = {Software Engineering Institute, Carnegie Mellon University},
+  year         = {2020},
+  note         = {Data set}
+}
+```
