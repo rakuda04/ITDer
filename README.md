@@ -73,7 +73,7 @@ graph TD
 
 ## Server Environment
 
-1. `git clone` the repository and run the docker-compose.yml` from `dist/server` directory.
+1. `git clone` the repository and run the docker-compose.yml from `server/` directory.
 
 2. Run the server environment using Docker Compose:
 
@@ -94,7 +94,7 @@ graph TD
 
 ## Local Data Collector Client
 
-1. run the installation script ```installer.py``` found in `/dist` directory on the target device:
+1. run the installation script ```installer.py``` found in `local/` directory on the target device:
 
 
 
