@@ -1,0 +1,23 @@
+services:
+  postgres:
+    build:
+      context: .
+  pgadmin:
+    build:
+      context: .
+  api:
+    build:
+      context: .
+      no_cache: true
+  worker:
+    build:
+      context: .
+      no_cache: true
+  dashboard:
+    build:
+      context: .
+      no_cache: true
+  telemetry:
+    build:
+      context: .
+      no_cache: true

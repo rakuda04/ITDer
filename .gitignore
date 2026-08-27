@@ -1,8 +1,10 @@
-cert_pipeline/output/*
-cert_pipeline/dataset
-!cert_pipeline/output/models/
-!cert_pipeline/output/models/*.pkl
-!cert_pipeline/output/cert_baseline_stats.json
-!cert_pipeline/output/cert_thresholds.json
-!cert_pipeline/output/model_intake_final.csv
-local_pipeline/output
+# Only track final model artifacts + key stats/thresholds from cert_pipeline;
+# raw datasets and intermediate output are regenerated, not versioned.
+archive/cert_pipeline/output/*
+archive/cert_pipeline/dataset
+# !archive/cert_pipeline/output/models/
+# !archive/cert_pipeline/output/models/*.pkl
+# !archive/cert_pipeline/output/cert_baseline_stats.json
+# !archive/cert_pipeline/output/cert_thresholds.json
+# !archive/cert_pipeline/output/model_intake_final.csv
+archive/local_pipeline/output
