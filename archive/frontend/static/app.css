@@ -55,6 +55,7 @@ body {
 
 /* ── layout ─────────────────────────────────────────────────── */
 .dash {
+  width: 100%;
   max-width: 1400px;
   margin: 0 auto;
   padding: 24px 32px 64px;
@@ -442,6 +443,8 @@ body {
 .ftable td { padding: 9px 14px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; color: var(--text-2); vertical-align: middle; }
 .ftable tr.ar td { background: rgba(220,38,38,0.06); }
 .ftable tr.ar td:first-child { border-left: 3px solid var(--red); }
+.ftable tr.weekend td { background: rgba(59, 130, 246, 0.05); }
+.ftable tr.weekend.ar td { background: rgba(220, 38, 38, 0.09); }
 .ftable tr:hover td { background: var(--bg-hover); }
 
 .f-date    { color: var(--text-3); font-family: monospace; }

@@ -21,7 +21,7 @@ const TIER_DARK = {
   medium:   { label: "Medium",   dot: "#34d399", text: "#34d399", bg: "#021c12", border: "#064e3b" },
 };
 
-const TABS = [["overview","Overview"],["timeline","Timeline"],["flags","Flags"],["shap","SHAP"],["info","Info"]];
+const TABS = [["overview","Overview"],["timeline","Timeline"],["shap","SHAP"],["info","Info"]];
 
 // ── theme ─────────────────────────────────────────────────────────────────────
 function getInitialDark() {
@@ -228,6 +228,7 @@ function SettingsPanel({ onClose, onDone, dark }) {
     normal_phase_days: 20, phased: true, random_scenarios: true,
   });
   const [inferCfg, setInferCfg] = React.useState({
+    contamination: 0.05,
     threshold: 0.3793,
   });
   const [running, setRunning] = React.useState(null); // 'synthetic' | 'inference' | null
@@ -399,11 +400,19 @@ function App() {
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {sortedUsers.map((u, i) => (
-              <option key={u.user} value={u.user}>
-                #{i + 1} {u.user}
-              </option>
-            ))}
+            {[...usersData].sort((a, b) => {
+              const typeA = a.user.includes('insider') ? 1 : a.user.includes('external') ? 2 : 3;
+              const typeB = b.user.includes('insider') ? 1 : b.user.includes('external') ? 2 : 3;
+              if (typeA !== typeB) return typeA - typeB;
+              return a.user.localeCompare(b.user);
+            }).map((u) => {
+              const rank = sortedUsers.findIndex(su => su.user === u.user) + 1;
+              return (
+                <option key={u.user} value={u.user}>
+                  #{rank} {u.user}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
@@ -523,57 +532,7 @@ function App() {
         </div>
       )}
 
-      {/* flags table */}
-      {tab === "flags" && (
-        <div className="panel">
-          <div className="panel-hdr">
-            <div className="ptitle" style={{ margin: 0 }}>Behavioral flags — {sel}</div>
-            <div className="legend">
-              <span className="legitem"><span className="flag-pill pill-red">ANOM</span> Anomaly detected</span>
-              <span className="legitem"><span className="bdot" style={{ background: "var(--red)" }} /> Above threshold</span>
-            </div>
-          </div>
-          <div className="sx" style={{ marginTop: 14 }}>
-            <table className="ftable">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Risk score</th>
-                  <th>After-hours sessions</th>
-                  <th>USB devices</th>
-                  <th>USB after-hours</th>
-                  <th>Job site visit</th>
-                  <th>Weekend session</th>
-                  <th>IsoForest</th>
-                  <th>Elliptic Env</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => {
-                  const isBreech = +row.above_threshold === 1;
-                  const isoAnom  = +row.iso_prediction === -1;
-                  const eeAnom  = +row.ee_prediction === -1;
-                  return (
-                    <tr key={row.date} className={isBreech ? "ar" : ""}>
-                      <td className="f-date">{row.date.slice(5)}</td>
-                      <td><span className="f-risk" style={{ color: scoreColor(row.combined_risk_score) }}>{pct(row.combined_risk_score)}</span></td>
-                      <td className={+row.after_hours_session_count > 0 ? "f-val-hi" : "f-val"}>{row.after_hours_session_count}</td>
-                      <td className={+row.usb_count > 0 ? "f-val-hi" : "f-val"}>{row.usb_count}</td>
-                      <td>{+row.usb_after_hours_flag ? <span className="flag-pill pill-red">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{+row.job_site_visits_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{+row.weekend_session_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{isoAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
-                      <td>{eeAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
-                      <td>{isBreech ? <span className="bdot" /> : ""}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+
 
       {/* shap */}
       {tab === "shap" && (

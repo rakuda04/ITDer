@@ -12,18 +12,6 @@
 #   usb_count_zscore, usb_count_zscore_has_baseline,
 #   job_site_visits_flag, job_search_plus_usb_week
 #
-# KNOWN SCHEMA DIFFERENCES vs CERT preprocessor:
-#   - usb_device_diversity_monthly: CERT measures nunique(pc) —
-#     how many distinct machines a USB was plugged into (lateral
-#     movement signal). Here we measure nunique(device_id) —
-#     how many distinct USB devices were used that month.
-#     These are different signals. CERT version needs auditing
-#     before conclusions can be drawn across both datasets.
-#
-#   - total_active_minutes_day: not used by the current model
-#     (confirmed). Carryover days (no STARTUP event) get NaN,
-#     not 0, to avoid false "zero activity" signal if the
-#     feature is re-introduced later.
 # ============================================================
 
 import sys
@@ -264,8 +252,8 @@ def process_device(df, cfg):
         usb_on_weekend_flag=('usb_weekend', 'max'),
     ).reset_index()
 
-    # DIFFERS FROM CERT: CERT measures nunique(pc) = distinct machines
-    # (lateral movement). Here: nunique(device) = distinct USB devices
+
+    # (lateral movement) nunique(device) = distinct USB devices
     monthly_diversity = usb.groupby(['user', 'month'])['device'].nunique().reset_index(
         name='usb_device_diversity_monthly'
     )

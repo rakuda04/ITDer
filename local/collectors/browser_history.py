@@ -94,7 +94,7 @@ def _query_chromium(db_path: Path, browser_name: str, days: int) -> list[dict]:
                 "url":         url,
                 "title":       title or "",
                 "visit_count": visit_count,
-                "user":        os.getlogin(),
+                "user":        os.environ.get("USERNAME") or os.getlogin() or "unknown",
             })
         conn.close()
     except Exception as exc:
@@ -130,7 +130,7 @@ def _query_firefox(db_path: Path, days: int) -> list[dict]:
                 "url":         url,
                 "title":       title or "",
                 "visit_count": visit_count,
-                "user":        os.getlogin(),
+                "user":        os.environ.get("USERNAME") or os.getlogin() or "unknown",
             })
         conn.close()
     except Exception as exc:

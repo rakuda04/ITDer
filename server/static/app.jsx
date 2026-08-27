@@ -21,7 +21,7 @@ const TIER_DARK = {
   medium:   { label: "Medium",   dot: "#34d399", text: "#34d399", bg: "#021c12", border: "#064e3b" },
 };
 
-const TABS = [["overview","Overview"],["timeline","Timeline"],["flags","Flags"],["shap","SHAP"],["info","Info"]];
+const TABS = [["overview","Overview"],["timeline","Timeline"],["shap","SHAP"],["info","Info"]];
 
 // ── theme ─────────────────────────────────────────────────────────────────────
 function getInitialDark() {
@@ -41,7 +41,7 @@ function useApi(url, refresh = 0) {
   const [error, setError]     = useState(null);
   useEffect(() => {
     setLoading(true);
-    fetch(url)
+    fetch(url, { cache: 'no-store' })
       .then((r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); })
       .then((d) => { setData(d); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
@@ -222,70 +222,109 @@ function Stepper({ value, onChange, min, max, step = 1 }) {
 }
 
 // ── settings panel ────────────────────────────────────────────────────────────
-function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic }) {
-  const [synthCfg, setSynthCfg] = React.useState({
-    n_normal_users: 27, n_insider_users: 3, n_days: 90,
-    normal_phase_days: 20, phased: true, random_scenarios: true,
-  });
-  const [inferCfg, setInferCfg] = React.useState({
-    threshold: 0.3793,
-  });
+function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic, synthCfg, setSynthCfg, inferCfg, setInferCfg }) {
   const [running, setRunning]   = React.useState(null);
   const [log, setLog]           = React.useState(null);
   const [mode, setMode]         = React.useState('manual');   // 'manual' | 'scheduled'
   const [schedHour, setSchedHour]   = React.useState(2);
   const [schedMin, setSchedMin]     = React.useState(0);
   const [schedSaving, setSchedSaving] = React.useState(false);
+  const [resetting, setResetting] = React.useState(false);
+  const [saveLog, setSaveLog] = React.useState(null);
 
   // Load current schedule on open
   React.useEffect(() => {
-    fetch('/api/schedule')
+    fetch('/api/settings')
       .then(r => r.json())
       .then(d => {
-        if (d.enabled) {
+        if (d.schedule_enabled) {
           setMode('scheduled');
-          setSchedHour(d.hour ?? 2);
-          setSchedMin(d.minute ?? 0);
+          // Parse hour/minute from cron if possible
+          const cronParts = (d.schedule_cron || "0 2 * * *").split(' ');
+          if (cronParts.length >= 2) {
+            setSchedMin(parseInt(cronParts[0]) || 0);
+            setSchedHour(parseInt(cronParts[1]) || 2);
+          }
         }
       })
       .catch(() => {});
   }, []);
 
-  const run = async (endpoint, cfg) => {
+  const run = async (endpoint) => {
     setRunning(endpoint);
+    setResetting(false);
     setLog(null);
     try {
-      const r = await fetch(`/api/run/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cfg),
-      });
-      const d = await r.json();
-      setLog({ ok: d.ok, text: d.ok ? '✓ Done' : (d.output || 'Error') });
-      if (d.ok) onDone();
-    } catch(e) {
-      setLog({ ok: false, text: String(e) });
-    }
-    setRunning(null);
-  };
-
-  const saveSchedule = async () => {
-    setSchedSaving(true);
-    setLog(null);
-    try {
-      const r = await fetch('/api/schedule', {
+      // First, save the current configuration to the database
+      await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enabled: mode === 'scheduled',
-          hour: schedHour,
-          minute: schedMin,
+          schedule_enabled: mode === 'scheduled',
+          schedule_cron: `${schedMin} ${schedHour} * * *`,
+          synthCfg: synthCfg,
+          inferCfg: inferCfg
+        }),
+      });
+
+      const payload = { ...inferCfg, ...synthCfg };
+      const r = await fetch(`/api/run/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        setRunning(null);
+        setLog({ ok: false, text: d.output || 'Error' });
+        return;
+      }
+      
+      const evt = new EventSource('/api/status_stream');
+      evt.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.pipeline_status === 'success') {
+            evt.close();
+            setRunning(null);
+            setLog({ ok: true, text: '✓ Done' });
+            onDone();
+          } else if (data.pipeline_status === 'failed') {
+            evt.close();
+            setRunning(null);
+            setLog({ ok: false, text: 'Pipeline failed' });
+          }
+        } catch(err) {}
+      };
+      evt.onerror = () => {
+        evt.close();
+        setRunning(null);
+        setLog({ ok: false, text: 'Stream error' });
+      };
+    } catch(e) {
+      setRunning(null);
+      setLog({ ok: false, text: String(e) });
+    }
+  };
+
+  const saveSettings = async () => {
+    setSchedSaving(true);
+    setSaveLog(null);
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schedule_enabled: mode === 'scheduled',
+          schedule_cron: `${schedMin} ${schedHour} * * *`,
+          synthCfg: synthCfg,
+          inferCfg: inferCfg
         }),
       });
       const d = await r.json();
-      setLog({ ok: d.ok, text: d.ok ? '✓ Schedule saved' : (d.error || 'Error saving schedule') });
+      setSaveLog({ ok: d.ok, text: d.ok ? '✓ Settings saved to database' : (d.error || 'Error saving settings') });
     } catch(e) {
-      setLog({ ok: false, text: String(e) });
+      setSaveLog({ ok: false, text: String(e) });
     }
     setSchedSaving(false);
   };
@@ -322,10 +361,6 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
                   onChange={v => setInferCfg({ threshold: +v.toFixed(4) })} />
               </div>
               <div className="settings-note">p99 of synthetic normals = 0.3793</div>
-              <button className="settings-run" disabled={running === 'inference'}
-                onClick={() => run('inference', inferCfg)}>
-                {running === 'inference' ? 'Running…' : 'Run inference now'}
-              </button>
             </div>
           )}
 
@@ -342,16 +377,21 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
               </div>
               <div className="settings-row">
                 <label>Minute</label>
-                <Stepper value={schedMin} min={0} max={59} step={5}
+                <Stepper value={schedMin} min={0} max={59} step={1}
                   onChange={v => setSchedMin(v)} />
               </div>
               <div className="settings-note">
                 Runs daily at {padZ(schedHour)}:{padZ(schedMin)} UTC
               </div>
               <button className="settings-run" disabled={schedSaving}
-                onClick={saveSchedule}>
+                onClick={saveSettings}>
                 {schedSaving ? 'Saving…' : 'Save schedule'}
               </button>
+              {saveLog && (
+                <div className={`settings-log ${saveLog.ok ? 'ok' : 'err'}`} style={{ margin: '10px 0 0 0', boxSizing: 'border-box', textAlign: 'center' }}>
+                  {saveLog.text}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -392,20 +432,28 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
             <Stepper value={synthCfg.normal_phase_days} min={1} max={synthCfg.n_days - 1}
               onChange={v => setSynthCfg(p => ({...p, normal_phase_days: v}))} />
           </div>
-          <div className="settings-row">
-            <label>Phased behavior</label>
-            <input type="checkbox" checked={synthCfg.phased}
-              onChange={e => setSynthCfg(p => ({...p, phased: e.target.checked}))} />
+        </div>
+
+        <div className="settings-section" style={{ borderBottom: 'none' }}>
+          <div className="settings-note" style={{ marginBottom: 15 }}>
+            Running the pipeline will generate a fresh synthetic background population using your settings, and then re-evaluate all user risk scores against the new baseline and alert threshold.
           </div>
-          <div className="settings-row">
-            <label>Random scenarios</label>
-            <input type="checkbox" checked={synthCfg.random_scenarios}
-              onChange={e => setSynthCfg(p => ({...p, random_scenarios: e.target.checked}))} />
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button className="settings-run" disabled={!!running || resetting}
+              onClick={() => {
+                setSynthCfg({ n_normal_users: 27, n_insider_users: 3, n_days: 90, normal_phase_days: 20, phased: true, random_scenarios: true });
+                setInferCfg({ threshold: 0.3793 });
+                setResetting(true);
+              }}
+              style={{ flex: 1, padding: '12px', fontSize: '14px', fontWeight: 'bold', background: resetting ? '#224422' : 'transparent', border: resetting ? '1px solid #44cc44' : '1px solid #4a4a5a', color: resetting ? '#44cc44' : '#a0a0b0', transition: 'all 0.2s' }}>
+              {resetting ? '✓ Reset' : 'Reset Default'}
+            </button>
+            <button className="settings-run" disabled={!!running || mode === 'scheduled'}
+              onClick={() => run('inference')}
+              style={{ flex: 1.5, padding: '12px', fontSize: '14px', fontWeight: 'bold', opacity: mode === 'scheduled' ? 0.5 : 1 }}>
+              {running ? 'Running…' : 'Save & Run Pipeline'}
+            </button>
           </div>
-          <button className="settings-run" disabled={running === 'synthetic'}
-            onClick={() => run('synthetic', synthCfg)}>
-            {running === 'synthetic' ? 'Running…' : 'Run synthetic generator'}
-          </button>
         </div>
 
         {log && (
@@ -416,10 +464,119 @@ function SettingsPanel({ onClose, onDone, dark, showSynthetic, onToggleSynthetic
   );
 }
 
-// ── main app ──────────────────────────────────────────────────────────────────
+// ── empty state (get started) ─────────────────────────────────────────────────
+function GetStarted({ dark, onSettingsClick, onDone }) {
+  const [dbStatus, setDbStatus] = React.useState({ features_count: 0, has_data: false });
+  const [running, setRunning] = React.useState(null); // null | 'synthetic' | 'inference'
+  const [log, setLog] = React.useState(null);
+
+  React.useEffect(() => {
+    const evtSource = new EventSource('/api/status_stream');
+    evtSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setDbStatus(data);
+        if (data.pipeline_status === 'success' && running === 'processing') {
+          onDone(); // Automatically exit GetStarted when processing finishes!
+        } else if (data.users_count > 0 && !running) {
+          onDone(); // For initial load if data already exists
+        }
+      } catch (err) {}
+    };
+    return () => evtSource.close();
+  }, [onDone]);
+
+  const handleGenerateAndProcess = async () => {
+    setLog(null);
+    try {
+      setRunning('processing');
+      const payload = {
+        threshold: 0.3793,
+        n_normal_users: 27, n_insider_users: 3, n_days: 90,
+        normal_phase_days: 20, phased: true, random_scenarios: true
+      };
+      let r = await fetch('/api/run/synthetic', { 
+        method: 'POST', 
+        body: JSON.stringify(payload), 
+        headers:{'Content-Type': 'application/json'} 
+      });
+      let d = await r.json();
+      if (!d.ok) throw new Error(d.output || "Error in synthetic generation");
+
+      // The backend worker triggers both synthetic generation and inference automatically,
+      // and runs them asynchronously in a single background thread.
+      // We DO NOT call onDone() manually here. Instead, we keep `running` as 'processing'.
+      // The SSE stream will automatically detect when the worker finishes (data.users_count > 0)
+      // and trigger onDone() for us!
+    } catch(e) {
+      setLog(String(e));
+      setRunning(null);
+    }
+  };
+
+  return (
+    <div className="get-started-view">
+      <div className="gs-content">
+        <div className="logo-wrap" style={{ justifyContent: 'center', marginBottom: 20 }}>
+          <svg className="logo" width="60" height="60" viewBox="0 0 314 314" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="314.002" height="314.002" rx="51.6556" fill="currentColor" className="logo-bg"/>
+            <path fillRule="evenodd" clipRule="evenodd" d="M132.585 66.8996C127.563 71.9211 124.16 79.8274 124.16 91.3166C124.16 105.462 128.928 119.787 136.005 130.402C143.401 141.495 151.466 146.054 157.002 146.054C162.538 146.054 170.603 141.495 177.998 130.402C185.075 119.787 189.844 105.462 189.844 91.3166C189.844 79.8274 186.44 71.9211 181.419 66.8996C176.397 61.8781 168.491 58.4744 157.002 58.4744C145.513 58.4744 137.606 61.8781 132.585 66.8996ZM190.885 149.639C192.809 147.369 194.59 144.985 196.216 142.547C205.56 128.531 211.739 110.014 211.739 91.3166C211.739 75.4373 206.932 61.4489 196.901 51.4176C186.869 41.3864 172.881 36.5796 157.002 36.5796C141.122 36.5796 127.134 41.3864 117.103 51.4176C107.072 61.4489 102.265 75.4373 102.265 91.3166C102.265 110.014 108.443 128.531 117.788 142.547C119.413 144.985 121.194 147.369 123.118 149.639C111.253 152.128 99.2161 156.021 88.3419 161.646C66.307 173.044 47.5313 192.559 47.5309 222.685C47.5309 222.684 47.5309 222.685 47.5309 222.685L47.5293 244.578C47.5279 262.717 62.2323 277.423 80.3715 277.423H178.897C184.943 277.423 189.844 272.521 189.844 266.475C189.844 260.429 184.943 255.528 178.897 255.528H80.3715C74.3251 255.528 69.4237 250.626 69.4241 244.579L69.4257 222.686C69.4257 203.549 80.7536 190.222 98.4012 181.093C116.285 171.842 139.076 167.948 157.002 167.948C179.408 167.948 208.582 173.987 226.913 188.243C231.686 191.955 238.564 191.094 242.275 186.322C245.987 181.549 245.127 174.671 240.354 170.959C226.292 160.023 208.347 153.301 190.885 149.639ZM214.945 214.945C219.22 210.669 226.152 210.669 230.427 214.945L244.581 229.098L258.735 214.945C263.01 210.669 269.942 210.669 274.217 214.945C278.492 219.22 278.492 226.151 274.217 230.426L260.063 244.58L274.216 258.734C278.492 263.009 278.492 269.941 274.216 274.216C269.941 278.491 263.01 278.491 258.734 274.216L244.581 260.062L230.428 274.216C226.152 278.491 219.221 278.491 214.946 274.216C210.67 269.941 210.67 263.009 214.946 258.734L229.099 244.58L214.945 230.426C210.67 226.151 210.67 219.22 214.945 214.945Z" fill="var(--logo-icon)"/>
+          </svg>
+        </div>
+        
+        <h1 className="gs-title">Welcome to ITDer</h1>
+        <p className="gs-desc">
+          Your database is currently empty. To see anomaly signals, timeline charts, and SHAP feature attribution, you need to collect some data.
+        </p>
+
+        <div className="gs-status-bar">
+          <div className={`gs-indicator ${dbStatus.has_data ? 'gs-ind-green' : 'gs-ind-red'}`}></div>
+          <div className="gs-status-text">
+            {dbStatus.has_data 
+              ? `Data detected! ${dbStatus.features_count} records ready for processing.`
+              : `Waiting for data stream... No records in database.`}
+          </div>
+        </div>
+
+        <div className="gs-grid">
+          <div className="gs-card" style={{ gridColumn: "span 2" }}>
+            <h3 className="gs-card-title">Option 1: Collect Real Data</h3>
+            <p className="gs-card-desc">
+              Deploy the local agent to stream real user activity logs into the ingest API from your endpoints.
+            </p>
+            <div className="gs-code" style={{ marginBottom: 24, alignSelf: 'flex-start' }}>python dist/installer.py</div>
+            
+            <h3 className="gs-card-title">Option 2: Use Synthetic Data</h3>
+            <p className="gs-card-desc">
+              Instantly populate the dashboard with CERT-like anomalous scenarios and normal background activity.
+            </p>
+            <button 
+              className={`gs-btn gs-btn-primary ${running ? 'gs-btn-loading' : ''}`} 
+              onClick={handleGenerateAndProcess}
+              disabled={!!running}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {running === 'processing' ? 'Processing data in background...' : 'Generate & Process Data'}
+            </button>
+            {log && <div className="gs-log err">{log}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── app ───────────────────────────────────────────────────────────────────────
 function App() {
+  const [synthCfg, setSynthCfg] = React.useState({
+    n_normal_users: 27, n_insider_users: 3, n_days: 90,
+    normal_phase_days: 20, phased: true, random_scenarios: true,
+  });
+  const [inferCfg, setInferCfg] = React.useState({
+    threshold: 0.3793,
+  });
   const [refresh, setRefresh]             = useState(0);
-  const [showSynthetic, setShowSynthetic] = useState(false);
+  const [showSynthetic, setShowSynthetic] = useState(true);
   const synthParam = showSynthetic ? "?include_synthetic=true" : "";
   const { data: usersData, loading: uL, error: uE } = useApi(`/api/users${synthParam}`, refresh);
   const { data: dailyAll,  loading: dL, error: dE } = useApi(`/api/daily${synthParam}`, refresh);
@@ -430,9 +587,39 @@ function App() {
   const [dark, setDark] = useState(getInitialDark);
   const [showSettings, setShowSettings] = useState(false);
 
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(d => {
+        if (d.synthCfg) setSynthCfg(d.synthCfg);
+        if (d.inferCfg) setInferCfg(d.inferCfg);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => { applyTheme(dark); }, [dark]);
   const reloadData = () => setRefresh(r => r + 1);
   const toggleTheme = () => setDark((d) => !d);
+
+  // Automatically refresh data when any background run finishes
+  useEffect(() => {
+    let wasRunning = false;
+    const evt = new EventSource('/api/status_stream');
+    evt.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.pipeline_status === 'running') {
+          wasRunning = true;
+        } else if (data.pipeline_status === 'success') {
+          if (wasRunning) {
+            reloadData();
+            wasRunning = false;
+          }
+        }
+      } catch(err) {}
+    };
+    return () => evt.close();
+  }, []);
 
   useEffect(() => {
     if (usersData.length && !sel) setSel(usersData[0].user);
@@ -467,6 +654,30 @@ function App() {
     </div>
   );
 
+  if (!loading && !error && usersData.length === 0) {
+    return (
+      <div className="dash">
+        <div className="hdr" style={{ justifyContent: "flex-end" }}>
+          <div className="hdr-controls">
+            <ThemeToggle dark={dark} onToggle={toggleTheme} />
+          </div>
+        </div>
+        <GetStarted dark={dark} onSettingsClick={() => setShowSettings(true)} onDone={reloadData} />
+        {showSettings && (
+          <SettingsPanel
+            onClose={() => setShowSettings(false)}
+            onDone={() => { setShowSettings(false); reloadData(); }}
+            dark={dark}
+            showSynthetic={showSynthetic}
+            onToggleSynthetic={() => setShowSynthetic(v => !v)}
+            synthCfg={synthCfg} setSynthCfg={setSynthCfg}
+            inferCfg={inferCfg} setInferCfg={setInferCfg}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="dash">
 
@@ -494,11 +705,19 @@ function App() {
             value={sel || ""}
             onChange={(e) => { setSel(e.target.value); setTab("overview"); }}
           >
-            {sortedUsers.map((u, i) => (
-              <option key={u.user} value={u.user}>
-                #{i + 1} {u.user}
-              </option>
-            ))}
+            {[...usersData].sort((a, b) => {
+              const typeA = a.user.includes('insider') ? 1 : a.user.includes('external') ? 2 : 3;
+              const typeB = b.user.includes('insider') ? 1 : b.user.includes('external') ? 2 : 3;
+              if (typeA !== typeB) return typeA - typeB;
+              return a.user.localeCompare(b.user);
+            }).map((u) => {
+              const rank = sortedUsers.findIndex(su => su.user === u.user) + 1;
+              return (
+                <option key={u.user} value={u.user}>
+                  #{rank} {u.user}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
@@ -618,57 +837,7 @@ function App() {
         </div>
       )}
 
-      {/* flags table */}
-      {tab === "flags" && (
-        <div className="panel">
-          <div className="panel-hdr">
-            <div className="ptitle" style={{ margin: 0 }}>Behavioral flags — {sel}</div>
-            <div className="legend">
-              <span className="legitem"><span className="flag-pill pill-red">ANOM</span> Anomaly detected</span>
-              <span className="legitem"><span className="bdot" style={{ background: "var(--red)" }} /> Above threshold</span>
-            </div>
-          </div>
-          <div className="sx" style={{ marginTop: 14 }}>
-            <table className="ftable">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Risk score</th>
-                  <th>After-hours sessions</th>
-                  <th>USB devices</th>
-                  <th>USB after-hours</th>
-                  <th>Job site visit</th>
-                  <th>Weekend session</th>
-                  <th>IsoForest</th>
-                  <th>Elliptic Env</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...daily].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((row) => {
-                  const isBreech = +row.above_threshold === 1;
-                  const isoAnom  = +row.iso_prediction === -1;
-                  const eeAnom  = +row.ee_prediction === -1;
-                  return (
-                    <tr key={row.date} className={isBreech ? "ar" : ""}>
-                      <td className="f-date">{row.date.slice(5)}</td>
-                      <td><span className="f-risk" style={{ color: scoreColor(row.combined_risk_score) }}>{pct(row.combined_risk_score)}</span></td>
-                      <td className={+row.after_hours_session_count > 0 ? "f-val-hi" : "f-val"}>{row.after_hours_session_count}</td>
-                      <td className={+row.usb_count > 0 ? "f-val-hi" : "f-val"}>{row.usb_count}</td>
-                      <td>{+row.usb_after_hours_flag ? <span className="flag-pill pill-red">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{+row.job_site_visits_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{+row.weekend_session_flag ? <span className="flag-pill pill-amber">YES</span> : <span className="f-nil">—</span>}</td>
-                      <td>{isoAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
-                      <td>{eeAnom ? <span className="flag-pill pill-red">ANOM</span> : <span className="f-nil">—</span>}</td>
-                      <td>{isBreech ? <span className="bdot" /> : ""}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+
 
       {/* shap */}
       {tab === "shap" && (
@@ -749,6 +918,8 @@ function App() {
           dark={dark}
           showSynthetic={showSynthetic}
           onToggleSynthetic={() => setShowSynthetic(v => !v)}
+          synthCfg={synthCfg} setSynthCfg={setSynthCfg}
+          inferCfg={inferCfg} setInferCfg={setInferCfg}
         />
       )}
     </div>

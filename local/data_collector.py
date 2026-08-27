@@ -1,5 +1,5 @@
 # ============================================================
-# pipeline.py  —  Orchestrator
+# data_collector.py  —  Orchestrator
 #
 # This is the only file that knows about ALL collectors and
 # processors.  Run this to produce the final CSV.
@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 import sys
 sys.dont_write_bytecode = True
-# Ensure project root is on the path when running directly
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import local.config as config

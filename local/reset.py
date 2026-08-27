@@ -45,6 +45,20 @@ def remove_install_dir():
 
 
 def remove_startup_entry():
+    import subprocess
+    # 1. Delete scheduled task from Task Scheduler
+    try:
+        log(f"Deleting scheduled task: {STARTUP_NAME}...")
+        cmd = ["schtasks", "/delete", "/tn", STARTUP_NAME, "/f"]
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        if result.returncode == 0:
+            log(f"Removed scheduled task: {STARTUP_NAME}")
+        else:
+            log(f"Scheduled task not found or already deleted: {STARTUP_NAME}")
+    except Exception as e:
+        log(f"Could not remove scheduled task: {e}")
+
+    # 2. Clean up legacy registry key if present
     try:
         key = winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
@@ -54,12 +68,13 @@ def remove_startup_entry():
         try:
             winreg.QueryValueEx(key, STARTUP_NAME)
             winreg.DeleteValue(key, STARTUP_NAME)
-            log(f"Removed startup entry: {STARTUP_NAME}")
+            log(f"Removed legacy registry startup entry: {STARTUP_NAME}")
         except FileNotFoundError:
-            log(f"Startup entry not found: {STARTUP_NAME} (skipping)")
+            pass
         winreg.CloseKey(key)
     except Exception as e:
         log(f"Could not access startup registry key: {e}")
+
 
 
 def remove_env_variables():
@@ -86,9 +101,18 @@ def remove_env_variables():
 
 
 def main():
+    # auto-elevate — triggers UAC prompt
     if not is_admin():
-        print("[reset] Please run as Administrator.")
-        sys.exit(1)
+        script = os.path.abspath(sys.argv[0])
+        params = [script] + sys.argv[1:]
+        params_str = " ".join(f'"{p}"' for p in params)
+        cwd = os.getcwd()
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, params_str, cwd, 1
+        )
+        sys.exit(0)
+
+
 
     print("=" * 45)
     print("  ITDer Reset — removing all installation artifacts")

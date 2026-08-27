@@ -84,7 +84,7 @@ def get_umdf_events(days: int = config.DAYS_BACK) -> list[dict]:
             "source":    "UMDF",
             "event_id":  eid,
             "device":    instance_node.text if instance_node is not None else "N/A",
-            "user":      os.getlogin(),
+            "user":      os.environ.get("USERNAME") or os.getlogin() or "unknown",
         })
 
     return sorted(results, key=lambda x: x["timestamp"])
@@ -120,7 +120,7 @@ def get_security_events(days: int = config.DAYS_BACK) -> list[dict]:
                 "source":    log_path,          # "Security" or "System"
                 "event_id":  eid,
                 "activity":  cfg["labels"].get(eid, "OTHER"),
-                "user":      os.getlogin(),
+                "user":      os.environ.get("USERNAME") or os.getlogin() or "unknown",
                 "logon_id":  event_data.get("TargetLogonId", "n/a"),
             })
 

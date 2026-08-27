@@ -64,23 +64,28 @@ graph TD
 
 ## Server Environment
 
-1. Download the `dist/server` directory onto your host server.
+1. `git clone` the repository and run the docker-compose.yml` from `dist/server` directory.
 
 2. Run the server environment using Docker Compose:
 
    ```bash
-   docker compose up -d
+   set "COMPOSE_BAKE=false" && docker compose up -d --build
    ```
 
 3. Access the dashboard via your browser at:
 
    ```
-   http://localhost:5000
+   http://localhost:5001
+   ```
+
+   telemetry can be accessed at:
+   ```
+   http://localhost:5002
    ```
 
 ## Local Data Collector Client
 
-1. run the installation script ```installer.py``` on the target device:
+1. run the installation script ```installer.py``` found in `/dist` directory on the target device:
 
 
 

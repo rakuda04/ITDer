@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16
+    build:
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
+      dockerfile: Dockerfile.postgres
     container_name: itder_postgres
     restart: unless-stopped
     environment:
@@ -9,7 +11,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password} 
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U itder_user -d itder"]
       interval: 10s
@@ -17,15 +18,15 @@ services:
       retries: 5
 
   pgadmin:
-    image: dpage/pgadmin4:latest
+    build:
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
+      dockerfile: Dockerfile.pgadmin
     container_name: itder_pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@itder.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-password}
       PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
-    volumes:
-      - ./servers.json:/pgadmin4/servers.json
     ports:
       - "5050:80"
     depends_on:
@@ -33,7 +34,7 @@ services:
 
   api:
     build:
-      context: .
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.api
     container_name: itder_api
     restart: unless-stopped
@@ -51,7 +52,7 @@ services:
 
   worker:
     build:
-      context: .
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.worker
     container_name: itder_worker
     restart: unless-stopped
@@ -69,7 +70,7 @@ services:
 
   dashboard:
     build:
-      context: .
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
       dockerfile: Dockerfile.dashboard
     container_name: itder_dashboard
     restart: unless-stopped
@@ -84,6 +85,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  telemetry:
+    build:
+      context: https://github.com/rakuda04/preprocessor.git#feat/livelogs:dist/server
+      dockerfile: Dockerfile.telemetry
+    container_name: itder_telemetry
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
 
   cloudflared:
     image: cloudflare/cloudflared:latest

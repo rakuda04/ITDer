@@ -25,27 +25,40 @@ import requests
 
 sys.dont_write_bytecode = True
 
-API_URL  = os.getenv("ITDER_API_URL", "https://your-tunnel.trycloudflare.com")
-ENDPOINT = f"{API_URL.rstrip('/')}/ingest"
-
 SCRIPT_DIR   = Path(__file__).resolve().parent
 OUTPUT_DIR   = SCRIPT_DIR / "output"
 DAILY_CSV    = OUTPUT_DIR / "local_report_daily.csv"
 USERS_CSV    = OUTPUT_DIR / "local_report_users.csv"
 FEATURES_CSV = OUTPUT_DIR / "local_model_intake.csv"
 
+# Read api_url.txt if it exists, otherwise fall back to default
+API_URL = "https://your-tunnel.trycloudflare.com"
+api_url_file = SCRIPT_DIR / "api_url.txt"
+if api_url_file.exists():
+    try:
+        API_URL = api_url_file.read_text().strip()
+    except Exception:
+        pass
+
+ENDPOINT = f"{API_URL.rstrip('/')}/ingest"
+
 
 def run():
-    missing = [p for p in [DAILY_CSV, USERS_CSV, FEATURES_CSV] if not p.exists()]
-    if missing:
-        print(f"[server] Missing output files: {[str(p) for p in missing]}")
+    if not FEATURES_CSV.exists():
+        print(f"[server] Missing output features file: {FEATURES_CSV}")
         print("[server] Run the pipeline first.")
         sys.exit(1)
 
     print("[server] Loading CSVs...")
     features  = pd.read_csv(FEATURES_CSV).fillna("").to_dict(orient="records")
-    scores    = pd.read_csv(DAILY_CSV).fillna("").to_dict(orient="records")
-    user_risk = pd.read_csv(USERS_CSV).fillna("").to_dict(orient="records")
+    
+    scores = []
+    if DAILY_CSV.exists():
+        scores = pd.read_csv(DAILY_CSV).fillna("").to_dict(orient="records")
+        
+    user_risk = []
+    if USERS_CSV.exists():
+        user_risk = pd.read_csv(USERS_CSV).fillna("").to_dict(orient="records")
 
     payload = {
         "hostname":        socket.gethostname(),
@@ -54,6 +67,7 @@ def run():
         "scores":          scores,
         "user_risk":       user_risk,
     }
+
 
     print(f"[server] Posting to {ENDPOINT}...")
     try:

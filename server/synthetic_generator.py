@@ -40,7 +40,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-# Force UTF-8 output so Unicode characters (→, ✅, —) print correctly
+# Force UTF-8 output so Unicode characters (→, —) print correctly
 # on Windows, whose console defaults to cp1252.
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -147,8 +147,12 @@ def _anchored_zscore(rng, baseline_stats, feat_name, dist_stats,
 
 
 def _generate_normal_day(stats: dict, rng: np.random.RandomState,
-                          baseline_stats: dict = None) -> dict:
+                          baseline_stats: dict = None, day_dt=None) -> dict:
     row = {}
+    is_weekend = False
+    if day_dt is not None:
+        is_weekend = day_dt.weekday() in (4, 5)
+
     for col in FEATURE_COLS:
         s   = stats[col]
         val = rng.normal(s['mean'], max(s['std'], 0.01))
@@ -185,7 +189,19 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
     row['usb_count'] = int(rng.random() < 0.10)  # ~1 in 10 days
     row['usb_device_diversity_monthly'] = int(rng.random() < 0.15)  # ~15% of months see >1 device
     row['job_site_visits_flag'] = int(rng.random() < 0.25)  # ~25% of days — realistic office browsing
-    row['weekend_session_flag'] = int(rng.random() < 0.15)  # ~15% of days — occasional weekend work
+    
+    if is_weekend:
+        row['weekend_session_flag'] = int(rng.random() < 0.03)  # ~3% of weekend days
+        if row['weekend_session_flag'] == 0:
+            row['job_site_visits_flag'] = 0
+            row['after_hours_session_count'] = 0
+            row['usb_count'] = 0
+            row['usb_after_hours_flag'] = 0
+            row['usb_on_weekend_flag'] = 0
+            row['usb_device_diversity_monthly'] = 0
+    else:
+        row['weekend_session_flag'] = 0
+
     row['job_search_plus_usb_week'] = 0  # rare naturally given low USB rate
 
     # Anchor z-scores with tight normal-day clipping [-1.5, 1.5]
@@ -207,13 +223,33 @@ def _generate_normal_day(stats: dict, rng: np.random.RandomState,
     # job_search_plus_usb_week: CERT normal mean is ~0.12 — keep sampled value.
     # (Previously forced to 0 — that was incorrect and biased the RF.)
 
+    if is_weekend:
+        if row['weekend_session_flag']:
+            row['total_active_minutes_day'] = rng.uniform(30, 240)
+        else:
+            row['total_active_minutes_day'] = 0.0
+    else:
+        if rng.random() < 0.05:
+            row['total_active_minutes_day'] = 0.0
+        else:
+            row['total_active_minutes_day'] = float(rng.normal(480, 60))
+
+    has_activity = (
+        row.get('job_site_visits_flag', 0) > 0 or 
+        row.get('after_hours_session_count', 0) > 0 or
+        row.get('weekend_session_flag', 0) > 0 or
+        row.get('usb_count', 0) > 0
+    )
+    if has_activity and row.get('total_active_minutes_day', 0) < 15:
+        row['total_active_minutes_day'] = rng.uniform(30, 480)
+
     return row
 
 
 def _generate_insider_day(stats: dict, scenario: int,
                            rng: np.random.RandomState,
-                           baseline_stats: dict = None) -> dict:
-    row = _generate_normal_day(stats, rng, baseline_stats)
+                           baseline_stats: dict = None, day_dt=None) -> dict:
+    row = _generate_normal_day(stats, rng, baseline_stats, day_dt)
 
     if scenario == 1:
         row['after_hours_session_count']     = int(rng.randint(2, 4))
@@ -238,9 +274,23 @@ def _generate_insider_day(stats: dict, scenario: int,
         row['usb_after_hours_flag']          = 1
         row['usb_count_zscore']              = float(rng.uniform(1.5, 2.5))
         row['usb_count_zscore_has_baseline'] = 1
-        row['weekend_session_flag']          = int(rng.randint(0, 2))
+        
+        if day_dt is not None and day_dt.weekday() in (4, 5):
+            row['weekend_session_flag']      = 1
+        else:
+            row['weekend_session_flag']      = 0
+            
         row['job_site_visits_flag']          = 1
         row['job_search_plus_usb_week']      = 1
+
+    has_activity = (
+        row.get('job_site_visits_flag', 0) > 0 or 
+        row.get('after_hours_session_count', 0) > 0 or
+        row.get('weekend_session_flag', 0) > 0 or
+        row.get('usb_count', 0) > 0
+    )
+    if has_activity and row.get('total_active_minutes_day', 0) < 15:
+        row['total_active_minutes_day'] = rng.uniform(30, 480)
 
     return row
 
@@ -257,12 +307,11 @@ def generate_normal_users(stats: dict, rng: np.random.RandomState,
         user = f"synth_normal_{i+1:03d}"
         for d in range(N_DAYS):
             day_dt = base_date - timedelta(days=N_DAYS - d)
-            row    = _generate_normal_day(stats, rng, baseline_stats)
+            row    = _generate_normal_day(stats, rng, baseline_stats, day_dt)
             row.update({
                 'user': user,
                 'date': day_dt.strftime('%Y-%m-%d'),
                 'day':  day_dt.strftime('%m/%d/%Y'),
-                'total_active_minutes_day': float(rng.normal(480, 60)),
                 'is_synthetic': 1,
                 'insider_label': 0,
                 'scenario': None,
@@ -295,15 +344,14 @@ def generate_insider_users(stats: dict, rng: np.random.RandomState,
             is_rogue = (not PHASED) or (d >= NORMAL_PHASE_DAYS)
 
             if is_rogue:
-                row = _generate_insider_day(stats, scenario, rng, baseline_stats)
+                row = _generate_insider_day(stats, scenario, rng, baseline_stats, day_dt)
             else:
-                row = _generate_normal_day(stats, rng, baseline_stats)
+                row = _generate_normal_day(stats, rng, baseline_stats, day_dt)
 
             row.update({
                 'user':          user,
                 'date':          day_dt.strftime('%Y-%m-%d'),
                 'day':           day_dt.strftime('%m/%d/%Y'),
-                'total_active_minutes_day': float(rng.normal(480, 60)),
                 'is_synthetic':  1,
                 'insider_label': 1 if is_rogue else 0,
                 'scenario':      scenario,
@@ -347,7 +395,7 @@ def generate(output_path: Path = OUTPUT_PATH, cfg_override=None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(output_path, index=False)
 
-    print(f"\n[synthetic] ✅ {len(combined)} rows → {output_path}")
+    print(f"\n[synthetic]  {len(combined)} rows → {output_path}")
     print(f"  Normal users  : {N_NORMAL_USERS} × {N_DAYS} = {N_NORMAL_USERS * N_DAYS} rows")
     print(f"  Insider users : {len(insider_df['user'].unique())} × {N_DAYS} = {len(insider_df)} rows")
     return combined
