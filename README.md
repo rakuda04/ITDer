@@ -6,6 +6,15 @@
 
 ---
 
+## What is ITDer?
+ITDer is an insider-threat detection tool that monitors local device telemetry (Windows events, browser history) and flags anomalous user behavior using a hybrid machine learning pipeline. A supervised Random Forest model trained on the CERT insider-threat dataset is then combined with two unsupervised anomaly detectors (Isolation Forest, Elliptic Envelope) and scored against the local user population, and results are explained per-feature using SHAP.
+
+## Repository layout
+- `local/` — client-side collector + preprocessor (runs on monitored device) + deployment scripts
+- `server/` — API, inference workers, dashboard, Docker services
+- `docs/` — development notes and testing process
+- `archive/` — earlier iterations of the program
+
 ## How it works 
 ```mermaid
 graph TD
@@ -90,3 +99,7 @@ graph TD
 
 
 2. During setup, you will be prompted to configure the server's API endpoint the default value is ```http://localhost:8000``` but you can change the api endpoint depending on your configuration.
+
+## Limitations
+- The supervised model (Random Forest) uses fixed weights from CERT training and is not retrained or fine-tuned on local data.
+- Local scoring is validated against a synthetic population, not real labeled local users actual detection accuracy on genuine insider behavior is untested (due to lack of data availability).
