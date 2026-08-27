@@ -114,9 +114,7 @@ def _load_thresholds():
             print(f"[infer] WARNING: '{key}' missing from cert_thresholds.json. "
                   f"Re-run model_training.py to regenerate thresholds with score ranges.")
 
-    # Override threshold: RF is disabled so the CERT p98 combined threshold is
-    # meaningless. Use unsupervised-only p95 derived from synthetic normal population.
-
+    
     return t
 
 

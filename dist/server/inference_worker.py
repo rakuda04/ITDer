@@ -5,7 +5,6 @@ Pulls daily_features from Postgres, runs synthetic generation
 and inference, then writes scores back to daily_scores and user_risk.
 
 Schedule (disabled by default):
-    Set ITDER_SCHEDULE=1 in environment to enable.
     Set ITDER_CRON="0 2 * * *" to customize (default: daily at 02:00 UTC).
 """
 

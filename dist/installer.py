@@ -354,7 +354,7 @@ def main():
         )
         sys.exit(0)
 
-    # We are admin! Clear/reset the install log
+    #  Clear/reset the install log
     try:
         if os.path.exists(r"C:\ProgramData\itder_install_log.txt"):
             os.remove(r"C:\ProgramData\itder_install_log.txt")
