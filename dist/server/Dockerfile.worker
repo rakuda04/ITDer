@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir \
 
 # 1. Clone the repository into a temporary directory
 # (Replace 'main' with your specific branch if needed, e.g., -b installation-script)
-RUN git clone -b main https://github.com/rakuda04/ITDer.git /tmp/repo
+RUN git clone -b feat/livelogs https://github.com/rakuda04/preprocessor.git /tmp/repo
 
 # 2. Create the necessary folder structure
 RUN mkdir -p ./worker_files/cert_pipeline/output/models \
